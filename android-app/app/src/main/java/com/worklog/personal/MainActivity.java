@@ -100,9 +100,9 @@ public final class MainActivity extends Activity {
         TextView export = action("导出备份", true);
         export.setOnClickListener(v -> exportBackup());
         top.addView(export, marginParams(-2, 42, 6, 0, 0, 0));
-        TextView import = action("恢复备份", false);
-        import.setOnClickListener(v -> chooseBackup());
-        top.addView(import, params(-2, 42));
+        TextView backupButton = action("恢复备份", false);
+        backupButton.setOnClickListener(v -> chooseBackup());
+        top.addView(backupButton, params(-2, 42));
         page.addView(top);
 
         addSpace(page, 22);
