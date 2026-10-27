@@ -1,10 +1,9 @@
+Attempting to perform the InitializeDefaultDrives operation on the 'FileSystem' provider failed.
 package com.worklog.personal;
 
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.app.TimePickerDialog;
 import android.content.ContentValues;
-import android.content.DialogInterface;
 import android.content.Intent;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
@@ -20,6 +19,7 @@ import android.widget.FrameLayout;
 import android.widget.GridLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -50,7 +50,7 @@ public final class MainActivity extends Activity {
     private static final int LINE = 0xFFE7E8DF;
     private static final int MINT = 0xFFE7F1E8;
     private static final int ORANGE = 0xFFD77B42;
-    private static final String APP_VERSION = "0.0.9";
+    private static final String APP_VERSION = "0.0.10";
 
     private final DateTimeFormatter monthFormatter = DateTimeFormatter.ofPattern("yyyy年M月", Locale.CHINA);
     private LocalDate shownMonth = LocalDate.now().withDayOfMonth(1);
@@ -71,6 +71,7 @@ public final class MainActivity extends Activity {
     private TextView actualHours;
     private TextView averageHours;
     private TextView balanceAmount;
+    private TextView unitSwitch;
     private TextView balanceCaption;
     private TextView balanceDetails;
     private TextView calendarSummary;
@@ -82,12 +83,14 @@ public final class MainActivity extends Activity {
     private TextView progressPending;
     private boolean focusTodayOnRender = true;
     private boolean scrollDaysToTopOnRender;
+    private boolean showMinutes;
     private int currentPage = 1;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         today = LocalDate.now();
+        showMinutes = getPreferences(MODE_PRIVATE).getBoolean("show_minutes", false);
         database = new AttendanceDatabase(this);
         getWindow().setStatusBarColor(PAPER);
         getWindow().setNavigationBarColor(PAPER);
@@ -196,10 +199,11 @@ public final class MainActivity extends Activity {
 
         TextView heading = text("月度概览", 21, INK, true);
         page.addView(heading, marginParams(-1, -2, 0, 10, 0, 0));
-        calendarSummary = text("工作日 0 天 · 休息日 0 天\n已记录 0.0 小时 · 目标 0.0 小时", 12, MUTED, false);
+        calendarSummary = text("工作日 0 天 · 休息日 0 天\n已记录 0.000 小时 · 目标 0.000 小时", 12, MUTED, false);
         calendarSummary.setLineSpacing(dp(5), 1f);
         calendarSummary.setPadding(dp(14), dp(12), dp(14), dp(12));
         calendarSummary.setBackground(roundBackground(CARD, 13, LINE));
+        setDurationToggle(calendarSummary);
         page.addView(calendarSummary, params(-1, -2));
         TextView legend = text("班 = 工作日 · 休 = 休息日；点日期可编辑，点状态可切换", 10, MUTED, false);
         page.addView(legend, marginParams(-1, -2, 2, 10, 0, 6));
@@ -240,13 +244,21 @@ public final class MainActivity extends Activity {
         LinearLayout balanceCard = column();
         balanceCard.setPadding(dp(15), dp(12), dp(15), dp(12));
         balanceCard.setBackground(roundBackground(GREEN, 14, 0));
+        LinearLayout balanceHeading = row();
         TextView balanceTitle = text("当前工时结算", 11, 0xFFD0E1D3, true);
-        balanceCard.addView(balanceTitle);
-        balanceAmount = text("欠 0.0 小时", 23, 0xFFF2B978, true);
+        balanceHeading.addView(balanceTitle, new LinearLayout.LayoutParams(0, -2, 1));
+        unitSwitch = action(showMinutes ? "显示小时" : "显示分钟", false);
+        unitSwitch.setTextSize(9);
+        unitSwitch.setOnClickListener(v -> toggleDurationUnit());
+        balanceHeading.addView(unitSwitch, params(-2, 32));
+        balanceCard.addView(balanceHeading);
+        balanceAmount = text("欠 0.000 小时", 23, 0xFFF2B978, true);
         balanceAmount.setPadding(0, dp(4), 0, dp(6));
+        setDurationToggle(balanceAmount);
         balanceCard.addView(balanceAmount);
-        balanceDetails = text("0 个工作日 × 8 小时 = 0.0 小时目标\n实际累计 0.0 小时", 10, 0xFFF7FBF6, false);
+        balanceDetails = text("0 个工作日 × 8.000 小时 = 0.000 小时目标\n实际累计 0.000 小时", 10, 0xFFF7FBF6, false);
         balanceDetails.setLineSpacing(dp(3), 1f);
+        setDurationToggle(balanceDetails);
         balanceCard.addView(balanceDetails);
         balanceCaption = text("按当前月份截至今天计算", 9, 0xFFD0E1D3, false);
         balanceCaption.setPadding(0, dp(5), 0, 0);
@@ -257,6 +269,8 @@ public final class MainActivity extends Activity {
         LinearLayout statsTop = row();
         actualHours = addStat(statsTop, "已记工时", "0 小时", "本月计薪时段", GREEN);
         averageHours = addStat(statsTop, "工作日均工时", "0 小时", "按已过工作日平均", GREEN);
+        setDurationToggle(actualHours);
+        setDurationToggle(averageHours);
         page.addView(statsTop);
 
         addSpace(page, 9);
@@ -422,23 +436,24 @@ public final class MainActivity extends Activity {
         int balance = expected - actual;
         double average = expectedDays == 0 ? 0 : (double) actual / expectedDays;
         int percent = expected == 0 ? 0 : Math.min(100, (int) Math.round(100.0 * actual / expected));
-        actualHours.setText(formatHours(actual) + " 小时");
-        averageHours.setText(formatHours((int) Math.round(average)) + " 小时");
+        actualHours.setText(formatDuration(actual));
+        averageHours.setText(formatDuration(average));
         if (balance > 0) {
-            balanceAmount.setText("欠 " + formatHours(balance) + " 小时");
+            balanceAmount.setText("欠 " + formatDuration(balance));
             balanceAmount.setTextColor(0xFFF2B978);
         } else if (balance < 0) {
-            balanceAmount.setText("超出 " + formatHours(-balance) + " 小时");
+            balanceAmount.setText("超出 " + formatDuration(-balance));
             balanceAmount.setTextColor(0xFFBFE4C8);
         } else {
             balanceAmount.setText("已达目标");
             balanceAmount.setTextColor(0xFFBFE4C8);
         }
-        balanceDetails.setText(expectedDays + " 个工作日 × 8 小时 = " + formatHours(expected) + " 小时目标\n实际累计 " + formatHours(actual) + " 小时");
+        balanceDetails.setText(expectedDays + " 个工作日 × " + formatDuration(TARGET_MINUTES) + " = " + formatDuration(expected) + " 目标\n实际累计 " + formatDuration(actual));
+        unitSwitch.setText(showMinutes ? "显示小时" : "显示分钟");
         balanceCaption.setText(shownMonth.getYear() == today.getYear() && shownMonth.getMonthValue() == today.getMonthValue()
                 ? "截至 " + today.getMonthValue() + " 月 " + today.getDayOfMonth() + " 日（含）"
                 : shownMonth.isBefore(today.withDayOfMonth(1)) ? "整月工时结算" : "未来月份，尚未开始累计");
-        calendarSummary.setText("工作日 " + fullMonthDays + " 天 · 休息日 " + restDays + " 天\n已记录 " + formatHours(monthActual) + " 小时 · 月目标 " + formatHours(goal) + " 小时\n已记录工作日 " + recordedDays + " 天 · 待补录 " + pending + " 天");
+        calendarSummary.setText("工作日 " + fullMonthDays + " 天 · 休息日 " + restDays + " 天\n已记录 " + formatDuration(monthActual) + " · 月目标 " + formatDuration(goal) + "\n已记录工作日 " + recordedDays + " 天 · 待补录 " + pending + " 天");
         progressLabel.setText(percent + "%");
         float fraction = expected == 0 ? 0 : Math.min(1f, (float) actual / expected);
         LinearLayout.LayoutParams fillParams = (LinearLayout.LayoutParams) progressFill.getLayoutParams();
@@ -480,7 +495,7 @@ public final class MainActivity extends Activity {
             cell.setBackground(roundBackground(workday ? MINT : 0xFFEEEFE8, 9, date.equals(today) ? GREEN : 0));
             cell.setClickable(true);
             cell.setFocusable(true);
-            cell.setContentDescription(date.getMonthValue() + "月" + day + "日，" + (workday ? "工作日" : "休息日") + (paid >= 0 ? "，" + formatHours(paid) + "小时" : ""));
+            cell.setContentDescription(date.getMonthValue() + "月" + day + "日，" + (workday ? "工作日" : "休息日") + (paid >= 0 ? "，" + formatDuration(paid) : ""));
             cell.setOnClickListener(v -> showDayDetails(date));
             TextView dayLabel = text(String.valueOf(day), 13, date.equals(today) ? GREEN : INK, true);
             dayLabel.setGravity(Gravity.CENTER);
@@ -494,9 +509,10 @@ public final class MainActivity extends Activity {
             status.setContentDescription("切换为" + (workday ? "休息日" : "工作日"));
             status.setOnClickListener(v -> toggleWorkday(date, record));
             cell.addView(status, marginParams(-2, -2, 0, 2, 0, 0));
-            TextView hours = text(paid >= 0 ? formatHours(paid) : (record != null && (hasText(record.start) || hasText(record.end)) ? "补录" : "·"), 8,
+            TextView hours = text(paid >= 0 ? formatDurationCompact(paid) : (record != null && (hasText(record.start) || hasText(record.end)) ? "补录" : "·"), 8,
                     paid >= 0 ? GREEN : MUTED, paid >= 0);
             hours.setGravity(Gravity.CENTER);
+            if (paid >= 0) setDurationToggle(hours);
             cell.addView(hours, marginParams(-1, -2, 0, 2, 0, 0));
             calendarGrid.addView(cell, cellParams);
         }
@@ -546,10 +562,12 @@ public final class MainActivity extends Activity {
             workdayToggle.setContentDescription((workday ? "工作日" : "休息日") + "，点击切换为" + (workday ? "休息日" : "工作日"));
             workdayToggle.setOnClickListener(v -> toggleWorkday(date, record));
             dateText.addView(workdayToggle, marginParams(-2, dp(21), 0, 3, 0, 0));
-            dateText.addView(text(workday ? "目标 8 小时" : "可补录实际工时", 9, MUTED, false), marginParams(-1, -2, 0, 2, 0, 0));
+            TextView targetHint = text(workday ? "目标 " + formatDuration(TARGET_MINUTES) : "可补录实际工时", 9, MUTED, false);
+            if (workday) setDurationToggle(targetHint);
+            dateText.addView(targetHint, marginParams(-1, -2, 0, 2, 0, 0));
             heading.addView(dateText, new LinearLayout.LayoutParams(0, -2, 1));
 
-            String totalLabel = paid >= 0 ? formatHours(paid) + " 小时"
+            String totalLabel = paid >= 0 ? formatDuration(paid)
                     : invalid ? "时间需检查"
                     : record != null && hasText(record.start) && !hasText(record.end) ? "待填下班时间"
                     : record != null && !hasText(record.start) && hasText(record.end) ? "待填上班时间"
@@ -558,6 +576,7 @@ public final class MainActivity extends Activity {
                     : (record != null && (hasText(record.start) || hasText(record.end)) && paid < 0 ? ORANGE : GREEN);
             TextView dayTotal = text(totalLabel, 15, totalColor, true);
             dayTotal.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+            if (paid >= 0) setDurationToggle(dayTotal);
             heading.addView(dayTotal);
             card.addView(heading);
 
@@ -601,10 +620,11 @@ public final class MainActivity extends Activity {
 
         LinearLayout content = column();
         content.setPadding(dp(20), dp(2), dp(20), dp(6));
-        String status = paid >= 0 ? "当天计薪工时 " + formatHours(paid) + " 小时"
+        String status = paid >= 0 ? "当天计薪工时 " + formatDuration(paid)
                 : dayDetail(record, workday, paid, invalid);
         TextView statusText = text(status, 12, invalid ? 0xFFAE5345 : (paid >= 0 ? GREEN : MUTED), true);
         statusText.setPadding(0, 0, 0, dp(12));
+        if (paid >= 0) setDurationToggle(statusText);
         content.addView(statusText);
 
         TextView startButton = action("上班打卡     " + (hasText(record == null ? null : record.start) ? record.start : "设置时间"), false);
@@ -645,25 +665,98 @@ public final class MainActivity extends Activity {
         AttendanceRecord current = records.get(date.toString());
         String existing = current == null ? null : (isStart ? current.start : current.end);
         int minutes = parseTime(existing, !isStart);
-        int hour = minutes >= 0 ? minutes / 60 : (isStart ? 8 : 18);
-        int minute = minutes >= 0 ? minutes % 60 : (isStart ? 30 : 0);
-        TimePickerDialog dialog = new TimePickerDialog(this, (picker, selectedHour, selectedMinute) -> {
-            String value = String.format(Locale.US, "%02d:%02d", selectedHour, selectedMinute);
-            saveTime(date, isStart, value);
-            if (returnToDetails) showDayDetails(date);
-        }, hour, minute, true);
-        dialog.setTitle(isStart ? "设置上班打卡时间" : "设置下班打卡时间");
-        dialog.setButton(DialogInterface.BUTTON_NEGATIVE, "清除", (d, which) -> {
+        boolean existing24 = !isStart && "24:00".equals(existing);
+        int hour = minutes >= 0 ? Math.min(23, minutes / 60) : (isStart ? 8 : 18);
+        int minute = existing24 ? 59 : minutes >= 0 ? minutes % 60 : (isStart ? 30 : 0);
+        int[] selected = {hour, minute};
+        boolean[] endOfDay = {existing24};
+        boolean[] cleared = {false};
+
+        LinearLayout content = column();
+        content.setPadding(dp(20), dp(4), dp(20), dp(8));
+        TextView preview = text(existing24 ? "24:00" : String.format(Locale.US, "%02d:%02d", hour, minute), 30, GREEN, true);
+        preview.setGravity(Gravity.CENTER);
+        preview.setPadding(0, dp(4), 0, dp(4));
+        content.addView(preview, params(-1, 52));
+        TextView instruction = text("拖动滑块选择时间，也可用 − / + 逐格微调", 11, MUTED, false);
+        instruction.setGravity(Gravity.CENTER);
+        content.addView(instruction, marginParams(-1, -2, 0, 1, 0, 8));
+        Runnable updatePreview = () -> {
+            cleared[0] = false;
+            preview.setText(endOfDay[0] ? "24:00" : String.format(Locale.US, "%02d:%02d", selected[0], selected[1]));
+        };
+        addTimeSlider(content, "小时", selected[0], 23, value -> {
+            selected[0] = value;
+            endOfDay[0] = false;
+            updatePreview.run();
+        });
+        addTimeSlider(content, "分钟（每格 1 分钟）", selected[1], 59, value -> {
+            selected[1] = value;
+            endOfDay[0] = false;
+            updatePreview.run();
+        });
+        TextView clearButton = action("清除这个时间", false);
+        clearButton.setTextSize(12);
+        content.addView(clearButton, marginParams(-1, 42, 0, 8, 0, 0));
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(isStart ? "设置上班打卡时间" : "设置下班打卡时间")
+                .setView(content)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("保存", null)
+                .setNeutralButton(isStart ? "清除" : "24:00", (d, which) -> {
+                    saveTime(date, isStart, isStart ? null : "24:00");
+                    if (returnToDetails) showDayDetails(date);
+                })
+                .create();
+        clearButton.setOnClickListener(v -> {
+            dialog.dismiss();
             saveTime(date, isStart, null);
             if (returnToDetails) showDayDetails(date);
         });
-        if (!isStart) {
-            dialog.setButton(DialogInterface.BUTTON_NEUTRAL, "24:00", (d, which) -> {
-                saveTime(date, false, "24:00");
-                if (returnToDetails) showDayDetails(date);
-            });
-        }
+        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String value = cleared[0] ? null : endOfDay[0] ? "24:00" : String.format(Locale.US, "%02d:%02d", selected[0], selected[1]);
+            dialog.dismiss();
+            saveTime(date, isStart, value);
+            if (returnToDetails) showDayDetails(date);
+        }));
         dialog.show();
+    }
+
+    private interface OnSliderValueChanged { void onValueChanged(int value); }
+
+    private void addTimeSlider(LinearLayout parent, String label, int initial, int maximum, OnSliderValueChanged listener) {
+        LinearLayout section = column();
+        LinearLayout titleRow = row();
+        titleRow.addView(text(label, 12, INK, true), new LinearLayout.LayoutParams(0, dp(28), 1));
+        TextView valueLabel = text(String.format(Locale.US, "%02d", initial), 13, GREEN, true);
+        titleRow.addView(valueLabel);
+        section.addView(titleRow);
+
+        LinearLayout sliderRow = row();
+        TextView decrement = action("−", false);
+        decrement.setTextSize(18);
+        sliderRow.addView(decrement, params(40, 40));
+        SeekBar slider = new SeekBar(this);
+        slider.setMax(maximum);
+        slider.setProgress(initial);
+        sliderRow.addView(slider, new LinearLayout.LayoutParams(0, dp(40), 1));
+        TextView increment = action("+", false);
+        increment.setTextSize(17);
+        sliderRow.addView(increment, params(40, 40));
+        section.addView(sliderRow);
+
+        slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                valueLabel.setText(String.format(Locale.US, "%02d", progress));
+                listener.onValueChanged(progress);
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) { }
+            @Override public void onStopTrackingTouch(SeekBar seekBar) { }
+        });
+        decrement.setOnClickListener(v -> slider.setProgress(Math.max(0, slider.getProgress() - 1)));
+        increment.setOnClickListener(v -> slider.setProgress(Math.min(maximum, slider.getProgress() + 1)));
+        parent.addView(section, marginParams(-1, -2, 0, 5, 0, 3));
     }
 
     private void saveTime(LocalDate date, boolean isStart, String value) {
@@ -711,8 +804,34 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private String formatHours(int minutes) {
-        return String.format(Locale.US, "%.1f", minutes / 60.0);
+    private void toggleDurationUnit() {
+        showMinutes = !showMinutes;
+        getPreferences(MODE_PRIVATE).edit().putBoolean("show_minutes", showMinutes).apply();
+        render();
+    }
+
+    private void setDurationToggle(TextView view) {
+        view.setClickable(true);
+        view.setFocusable(true);
+        view.setContentDescription("点击切换工时单位；当前显示" + (showMinutes ? "分钟" : "小时"));
+        view.setOnClickListener(v -> {
+            toggleDurationUnit();
+            view.setContentDescription("点击切换工时单位；当前显示" + (showMinutes ? "分钟" : "小时"));
+        });
+    }
+
+    private String formatDuration(double minutes) {
+        if (showMinutes) {
+            if (Math.abs(minutes - Math.rint(minutes)) < 0.0001) {
+                return String.format(Locale.US, "%.0f 分钟", minutes);
+            }
+            return String.format(Locale.US, "%.2f 分钟", minutes);
+        }
+        return String.format(Locale.US, "%.3f 小时", minutes / 60.0);
+    }
+
+    private String formatDurationCompact(int minutes) {
+        return showMinutes ? minutes + "分" : String.format(Locale.US, "%.3fh", minutes / 60.0);
     }
 
     private boolean hasText(String text) {
@@ -765,7 +884,7 @@ public final class MainActivity extends Activity {
                 boolean workday = isWorkday(date, record);
                 int minutes = getPaidMinutes(record);
                 String status = minutes >= 0 ? "已记录" : record != null && (hasText(record.start) || hasText(record.end)) ? "时间需检查或补全" : workday ? "未打卡" : "休息日";
-                String hours = minutes < 0 ? "0.00" : String.format(Locale.US, "%.2f", minutes / 60.0);
+                String hours = minutes < 0 ? "0.000" : String.format(Locale.US, "%.3f", minutes / 60.0);
                 String line = csv(date.toString()) + "," + csv(weekdayName(date.getDayOfWeek())) + "," + csv(workday ? "是" : "否") + "," + csv(value(record == null ? null : record.start)) + "," + csv(value(record == null ? null : record.end)) + "," + csv(hours) + "," + csv(status);
                 writer.write(line);
                 writer.write("\r\n");
