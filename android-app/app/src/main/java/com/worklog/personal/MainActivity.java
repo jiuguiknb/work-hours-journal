@@ -17,6 +17,7 @@ import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.widget.FrameLayout;
+import android.widget.GridLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -49,21 +50,30 @@ public final class MainActivity extends Activity {
     private static final int LINE = 0xFFE7E8DF;
     private static final int MINT = 0xFFE7F1E8;
     private static final int ORANGE = 0xFFD77B42;
+    private static final String APP_VERSION = "0.0.9";
 
     private final DateTimeFormatter monthFormatter = DateTimeFormatter.ofPattern("yyyy年M月", Locale.CHINA);
     private LocalDate shownMonth = LocalDate.now().withDayOfMonth(1);
     private LocalDate today;
     private AttendanceDatabase database;
     private Map<String, AttendanceRecord> records = new HashMap<>();
+    private LinearLayout rootLayout;
     private SwipeFrameLayout pageContainer;
+    private LinearLayout monthlyPage;
     private LinearLayout homePage;
+    private LinearLayout navigationBar;
+    private final ArrayList<LinearLayout> navigationItems = new ArrayList<>();
     private ScrollView daysScroll;
     private LinearLayout daysList;
     private TextView monthTitle;
+    private TextView calendarMonthTitle;
+    private GridLayout calendarGrid;
     private TextView actualHours;
     private TextView averageHours;
-    private TextView shortfallHours;
-    private TextView monthlyGoal;
+    private TextView balanceAmount;
+    private TextView balanceCaption;
+    private TextView balanceDetails;
+    private TextView calendarSummary;
     private TextView progressLabel;
     private LinearLayout progressTrack;
     private View progressFill;
@@ -72,6 +82,7 @@ public final class MainActivity extends Activity {
     private TextView progressPending;
     private boolean focusTodayOnRender = true;
     private boolean scrollDaysToTopOnRender;
+    private int currentPage = 1;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -103,10 +114,23 @@ public final class MainActivity extends Activity {
     private View createPage() {
         pageContainer = new SwipeFrameLayout(this);
         pageContainer.setBackgroundColor(PAPER);
-        pageContainer.setOnSwipeListener(toTools -> showPage(toTools));
+        pageContainer.setOnSwipeListener(left -> showPage(Math.max(0, Math.min(2, currentPage + (left ? 1 : -1)))));
+
+        rootLayout = column();
+        rootLayout.setBackgroundColor(PAPER);
+        rootLayout.addView(pageContainer, new LinearLayout.LayoutParams(-1, 0, 1));
+
+        ScrollView calendarScroll = new ScrollView(this);
+        calendarScroll.setFillViewport(true);
+        calendarScroll.setBackgroundColor(PAPER);
+        monthlyPage = column();
+        monthlyPage.setPadding(dp(16), dp(12), dp(16), dp(18));
+        calendarScroll.addView(monthlyPage);
+        pageContainer.addView(calendarScroll, new FrameLayout.LayoutParams(-1, -1));
+        buildMonthlyPage(monthlyPage);
 
         homePage = column();
-        homePage.setPadding(dp(16), dp(12), dp(16), dp(12));
+        homePage.setPadding(dp(16), dp(12), dp(16), dp(10));
         pageContainer.addView(homePage, new FrameLayout.LayoutParams(-1, -1));
         buildHomePage(homePage);
 
@@ -119,40 +143,123 @@ public final class MainActivity extends Activity {
         toolsScroll.addView(toolsPage);
         pageContainer.addView(toolsScroll, new FrameLayout.LayoutParams(-1, -1));
         buildToolsPage(toolsPage);
-        return pageContainer;
+
+        navigationBar = row();
+        navigationBar.setPadding(dp(8), dp(6), dp(8), dp(6));
+        navigationBar.setBackgroundColor(CARD);
+        navigationBar.setElevation(dp(6));
+        String[] labels = {"月度", "每日", "工具"};
+        String[] icons = {"▦", "◷", "⋯"};
+        for (int index = 0; index < labels.length; index++) {
+            final int pageIndex = index;
+            LinearLayout item = column();
+            item.setGravity(Gravity.CENTER);
+            item.setPadding(0, dp(4), 0, dp(3));
+            item.setClickable(true);
+            item.setFocusable(true);
+            item.setContentDescription(labels[index] + "页面");
+            TextView icon = text(icons[index], 17, MUTED, true);
+            icon.setGravity(Gravity.CENTER);
+            TextView label = text(labels[index], 10, MUTED, true);
+            label.setGravity(Gravity.CENTER);
+            item.addView(icon);
+            item.addView(label, marginParams(-1, -2, 0, 2, 0, 0));
+            item.setOnClickListener(v -> showPage(pageIndex));
+            LinearLayout.LayoutParams itemParams = new LinearLayout.LayoutParams(0, dp(52), 1);
+            itemParams.setMargins(dp(4), 0, dp(4), 0);
+            navigationBar.addView(item, itemParams);
+            navigationItems.add(item);
+        }
+        rootLayout.addView(navigationBar, params(-1, 64));
+        pageContainer.setCurrentPage(currentPage);
+        showPage(currentPage);
+        return rootLayout;
     }
 
-    private void buildHomePage(LinearLayout page) {
+    private void buildMonthlyPage(LinearLayout page) {
         LinearLayout monthRow = row();
         TextView previous = action("‹", false);
         previous.setTextSize(21);
-        previous.setOnClickListener(v -> { shownMonth = shownMonth.minusMonths(1); focusTodayOnRender = false; scrollDaysToTopOnRender = true; render(); });
+        previous.setOnClickListener(v -> changeMonth(-1));
         monthRow.addView(previous, params(44, 42));
-        monthTitle = text("", 15, INK, true);
-        monthTitle.setGravity(Gravity.CENTER);
-        monthRow.addView(monthTitle, new LinearLayout.LayoutParams(0, dp(42), 1));
+        calendarMonthTitle = text("", 15, INK, true);
+        calendarMonthTitle.setGravity(Gravity.CENTER);
+        monthRow.addView(calendarMonthTitle, new LinearLayout.LayoutParams(0, dp(42), 1));
         TextView next = action("›", false);
         next.setTextSize(21);
-        next.setOnClickListener(v -> { shownMonth = shownMonth.plusMonths(1); focusTodayOnRender = false; scrollDaysToTopOnRender = true; render(); });
+        next.setOnClickListener(v -> changeMonth(1));
         monthRow.addView(next, params(44, 42));
         TextView todayButton = action("今天", true);
         todayButton.setOnClickListener(v -> { shownMonth = today.withDayOfMonth(1); focusTodayOnRender = true; render(); });
         monthRow.addView(todayButton, marginParams(-2, 42, 8, 0, 0, 0));
         page.addView(monthRow);
 
-        addSpace(page, 13);
+        TextView heading = text("月度概览", 21, INK, true);
+        page.addView(heading, marginParams(-1, -2, 0, 10, 0, 0));
+        calendarSummary = text("工作日 0 天 · 休息日 0 天\n已记录 0.0 小时 · 目标 0.0 小时", 12, MUTED, false);
+        calendarSummary.setLineSpacing(dp(5), 1f);
+        calendarSummary.setPadding(dp(14), dp(12), dp(14), dp(12));
+        calendarSummary.setBackground(roundBackground(CARD, 13, LINE));
+        page.addView(calendarSummary, params(-1, -2));
+        TextView legend = text("班 = 工作日 · 休 = 休息日；点日期可编辑，点状态可切换", 10, MUTED, false);
+        page.addView(legend, marginParams(-1, -2, 2, 10, 0, 6));
+
+        LinearLayout weekdays = row();
+        String[] weekdayLabels = {"一", "二", "三", "四", "五", "六", "日"};
+        for (String weekday : weekdayLabels) {
+            TextView label = text(weekday, 10, MUTED, true);
+            label.setGravity(Gravity.CENTER);
+            weekdays.addView(label, new LinearLayout.LayoutParams(0, dp(27), 1));
+        }
+        page.addView(weekdays);
+        calendarGrid = new GridLayout(this);
+        calendarGrid.setColumnCount(7);
+        calendarGrid.setAlignmentMode(GridLayout.ALIGN_BOUNDS);
+        page.addView(calendarGrid, marginParams(-1, -2, 0, 2, 0, 0));
+    }
+
+    private void buildHomePage(LinearLayout page) {
+        LinearLayout monthRow = row();
+        TextView previous = action("‹", false);
+        previous.setTextSize(21);
+        previous.setOnClickListener(v -> changeMonth(-1));
+        monthRow.addView(previous, params(44, 42));
+        monthTitle = text("", 15, INK, true);
+        monthTitle.setGravity(Gravity.CENTER);
+        monthRow.addView(monthTitle, new LinearLayout.LayoutParams(0, dp(42), 1));
+        TextView next = action("›", false);
+        next.setTextSize(21);
+        next.setOnClickListener(v -> changeMonth(1));
+        monthRow.addView(next, params(44, 42));
+        TextView todayButton = action("今天", true);
+        todayButton.setOnClickListener(v -> { shownMonth = today.withDayOfMonth(1); focusTodayOnRender = true; render(); });
+        monthRow.addView(todayButton, marginParams(-2, 42, 8, 0, 0, 0));
+        page.addView(monthRow);
+
+        addSpace(page, 8);
+        LinearLayout balanceCard = column();
+        balanceCard.setPadding(dp(15), dp(12), dp(15), dp(12));
+        balanceCard.setBackground(roundBackground(GREEN, 14, 0));
+        TextView balanceTitle = text("当前工时结算", 11, 0xFFD0E1D3, true);
+        balanceCard.addView(balanceTitle);
+        balanceAmount = text("欠 0.0 小时", 23, 0xFFF2B978, true);
+        balanceAmount.setPadding(0, dp(4), 0, dp(6));
+        balanceCard.addView(balanceAmount);
+        balanceDetails = text("0 个工作日 × 8 小时 = 0.0 小时目标\n实际累计 0.0 小时", 10, 0xFFF7FBF6, false);
+        balanceDetails.setLineSpacing(dp(3), 1f);
+        balanceCard.addView(balanceDetails);
+        balanceCaption = text("按当前月份截至今天计算", 9, 0xFFD0E1D3, false);
+        balanceCaption.setPadding(0, dp(5), 0, 0);
+        balanceCard.addView(balanceCaption);
+        page.addView(balanceCard);
+
+        addSpace(page, 9);
         LinearLayout statsTop = row();
         actualHours = addStat(statsTop, "已记工时", "0 小时", "本月计薪时段", GREEN);
         averageHours = addStat(statsTop, "工作日均工时", "0 小时", "按已过工作日平均", GREEN);
         page.addView(statsTop);
-        LinearLayout statsBottom = row();
-        shortfallHours = addStat(statsBottom, "当前欠工时", "0 小时", "截至今天的目标差额", ORANGE);
-        monthlyGoal = addStat(statsBottom, "本月目标", "0 小时", "工作日 × 8 小时", GREEN);
-        LinearLayout.LayoutParams statsBottomParams = params(-1, -2);
-        statsBottomParams.topMargin = dp(9);
-        page.addView(statsBottom, statsBottomParams);
 
-        addSpace(page, 12);
+        addSpace(page, 9);
         LinearLayout progressCard = column();
         progressCard.setPadding(dp(16), dp(14), dp(16), dp(14));
         progressCard.setBackground(roundBackground(GREEN, 14, 0));
@@ -176,12 +283,12 @@ public final class MainActivity extends Activity {
         progressBottom.addView(progressDays, new LinearLayout.LayoutParams(0, -2, 1));
         progressBottom.addView(progressPending);
         progressCard.addView(progressBottom, marginParams(-1, -2, 0, 7, 0, 0));
-        page.addView(progressCard, marginParams(-1, -2, 0, 12, 0, 0));
+        page.addView(progressCard, marginParams(-1, -2, 0, 8, 0, 0));
 
-        addSpace(page, 13);
+        addSpace(page, 9);
         LinearLayout dailyHeading = row();
         dailyHeading.addView(text("每日记录", 16, INK, true), new LinearLayout.LayoutParams(0, -2, 1));
-        dailyHeading.addView(text("左滑进入工具页  ›", 9, MUTED, false));
+        dailyHeading.addView(text("状态可点切换", 9, MUTED, false));
         page.addView(dailyHeading);
         TextView tip = text("按实际上下班时间记录 · 可提前打卡 · 下班可填至 24:00", 10, MUTED, false);
         tip.setPadding(0, dp(3), 0, dp(7));
@@ -197,10 +304,7 @@ public final class MainActivity extends Activity {
 
     private void buildToolsPage(LinearLayout page) {
         LinearLayout top = row();
-        top.addView(text("▦  工时日记", 14, GREEN, true), new LinearLayout.LayoutParams(0, dp(42), 1));
-        TextView back = action("‹ 返回首页", false);
-        back.setOnClickListener(v -> showPage(false));
-        top.addView(back, params(-2, 42));
+        top.addView(text("▦  工时日记 " + APP_VERSION, 14, GREEN, true), new LinearLayout.LayoutParams(0, dp(42), 1));
         page.addView(top);
         addSpace(page, 21);
         page.addView(text("工具与备份", 24, INK, true));
@@ -233,11 +337,20 @@ public final class MainActivity extends Activity {
         page.addView(localHint);
     }
 
-    private void showPage(boolean showTools) {
-        if (pageContainer == null || pageContainer.getChildCount() < 2) return;
-        pageContainer.getChildAt(0).setVisibility(showTools ? View.GONE : View.VISIBLE);
-        pageContainer.getChildAt(1).setVisibility(showTools ? View.VISIBLE : View.GONE);
-        pageContainer.setCurrentPage(showTools ? 1 : 0);
+    private void showPage(int page) {
+        if (pageContainer == null || pageContainer.getChildCount() < 3) return;
+        currentPage = Math.max(0, Math.min(2, page));
+        for (int index = 0; index < pageContainer.getChildCount(); index++) {
+            pageContainer.getChildAt(index).setVisibility(index == currentPage ? View.VISIBLE : View.GONE);
+        }
+        pageContainer.setCurrentPage(currentPage);
+        for (int index = 0; index < navigationItems.size(); index++) {
+            boolean selected = index == currentPage;
+            LinearLayout item = navigationItems.get(index);
+            item.setBackground(roundBackground(selected ? MINT : CARD, 11, 0));
+            ((TextView) item.getChildAt(0)).setTextColor(selected ? GREEN : MUTED);
+            ((TextView) item.getChildAt(1)).setTextColor(selected ? GREEN : MUTED);
+        }
     }
 
     private TextView addStat(LinearLayout parent, String label, String initial, String note, int color) {
@@ -258,9 +371,18 @@ public final class MainActivity extends Activity {
 
     private void render() {
         monthTitle.setText(monthFormatter.format(shownMonth));
+        calendarMonthTitle.setText(monthFormatter.format(shownMonth));
         records = database.loadMonth(shownMonth.getYear(), shownMonth.getMonthValue());
         renderSummary();
+        renderCalendar();
         renderDays();
+    }
+
+    private void changeMonth(int amount) {
+        shownMonth = shownMonth.plusMonths(amount);
+        focusTodayOnRender = false;
+        scrollDaysToTopOnRender = true;
+        render();
     }
 
     private void renderSummary() {
@@ -271,16 +393,24 @@ public final class MainActivity extends Activity {
         else elapsedThrough = 0;
 
         int actual = 0;
+        int monthActual = 0;
         int expectedDays = 0;
         int fullMonthDays = 0;
+        int restDays = 0;
         int pending = 0;
+        int recordedDays = 0;
         for (int day = 1; day <= daysInMonth; day++) {
             LocalDate date = shownMonth.withDayOfMonth(day);
             AttendanceRecord record = records.get(date.toString());
             boolean workday = isWorkday(date, record);
             if (workday) fullMonthDays++;
-            if (day > elapsedThrough) continue;
+            else restDays++;
             int paid = getPaidMinutes(record);
+            if (paid >= 0) {
+                monthActual += paid;
+                if (workday) recordedDays++;
+            }
+            if (day > elapsedThrough) continue;
             if (workday) {
                 expectedDays++;
                 if (paid < 0) pending++;
@@ -289,13 +419,26 @@ public final class MainActivity extends Activity {
         }
         int expected = expectedDays * TARGET_MINUTES;
         int goal = fullMonthDays * TARGET_MINUTES;
-        int deficit = Math.max(0, expected - actual);
+        int balance = expected - actual;
         double average = expectedDays == 0 ? 0 : (double) actual / expectedDays;
         int percent = expected == 0 ? 0 : Math.min(100, (int) Math.round(100.0 * actual / expected));
         actualHours.setText(formatHours(actual) + " 小时");
         averageHours.setText(formatHours((int) Math.round(average)) + " 小时");
-        shortfallHours.setText(formatHours(deficit) + " 小时");
-        monthlyGoal.setText(formatHours(goal) + " 小时");
+        if (balance > 0) {
+            balanceAmount.setText("欠 " + formatHours(balance) + " 小时");
+            balanceAmount.setTextColor(0xFFF2B978);
+        } else if (balance < 0) {
+            balanceAmount.setText("超出 " + formatHours(-balance) + " 小时");
+            balanceAmount.setTextColor(0xFFBFE4C8);
+        } else {
+            balanceAmount.setText("已达目标");
+            balanceAmount.setTextColor(0xFFBFE4C8);
+        }
+        balanceDetails.setText(expectedDays + " 个工作日 × 8 小时 = " + formatHours(expected) + " 小时目标\n实际累计 " + formatHours(actual) + " 小时");
+        balanceCaption.setText(shownMonth.getYear() == today.getYear() && shownMonth.getMonthValue() == today.getMonthValue()
+                ? "截至 " + today.getMonthValue() + " 月 " + today.getDayOfMonth() + " 日（含）"
+                : shownMonth.isBefore(today.withDayOfMonth(1)) ? "整月工时结算" : "未来月份，尚未开始累计");
+        calendarSummary.setText("工作日 " + fullMonthDays + " 天 · 休息日 " + restDays + " 天\n已记录 " + formatHours(monthActual) + " 小时 · 月目标 " + formatHours(goal) + " 小时\n已记录工作日 " + recordedDays + " 天 · 待补录 " + pending + " 天");
         progressLabel.setText(percent + "%");
         float fraction = expected == 0 ? 0 : Math.min(1f, (float) actual / expected);
         LinearLayout.LayoutParams fillParams = (LinearLayout.LayoutParams) progressFill.getLayoutParams();
@@ -308,6 +451,55 @@ public final class MainActivity extends Activity {
         progressRemainder.setLayoutParams(remainderParams);
         progressDays.setText((expectedDays - pending) + "/" + expectedDays + " 个工作日已记录");
         progressPending.setText(pending + " 天待补录");
+    }
+
+    private void renderCalendar() {
+        calendarGrid.removeAllViews();
+        int offset = shownMonth.withDayOfMonth(1).getDayOfWeek().getValue() - 1;
+        int days = shownMonth.lengthOfMonth();
+        for (int slot = 0; slot < 42; slot++) {
+            int rowIndex = slot / 7;
+            int columnIndex = slot % 7;
+            int day = slot - offset + 1;
+            GridLayout.LayoutParams cellParams = new GridLayout.LayoutParams(
+                    GridLayout.spec(rowIndex), GridLayout.spec(columnIndex, 1, 1f));
+            cellParams.width = 0;
+            cellParams.height = dp(64);
+            cellParams.setMargins(dp(2), dp(2), dp(2), dp(2));
+            if (day < 1 || day > days) {
+                calendarGrid.addView(new View(this), cellParams);
+                continue;
+            }
+            LocalDate date = shownMonth.withDayOfMonth(day);
+            AttendanceRecord record = records.get(date.toString());
+            boolean workday = isWorkday(date, record);
+            int paid = getPaidMinutes(record);
+            LinearLayout cell = column();
+            cell.setGravity(Gravity.CENTER);
+            cell.setPadding(dp(2), dp(4), dp(2), dp(3));
+            cell.setBackground(roundBackground(workday ? MINT : 0xFFEEEFE8, 9, date.equals(today) ? GREEN : 0));
+            cell.setClickable(true);
+            cell.setFocusable(true);
+            cell.setContentDescription(date.getMonthValue() + "月" + day + "日，" + (workday ? "工作日" : "休息日") + (paid >= 0 ? "，" + formatHours(paid) + "小时" : ""));
+            cell.setOnClickListener(v -> showDayDetails(date));
+            TextView dayLabel = text(String.valueOf(day), 13, date.equals(today) ? GREEN : INK, true);
+            dayLabel.setGravity(Gravity.CENTER);
+            cell.addView(dayLabel);
+            TextView status = text(workday ? "班" : "休", 8, workday ? GREEN : MUTED, true);
+            status.setGravity(Gravity.CENTER);
+            status.setPadding(dp(8), dp(2), dp(8), dp(2));
+            status.setBackground(roundBackground(CARD, 7, 0));
+            status.setClickable(true);
+            status.setFocusable(true);
+            status.setContentDescription("切换为" + (workday ? "休息日" : "工作日"));
+            status.setOnClickListener(v -> toggleWorkday(date, record));
+            cell.addView(status, marginParams(-2, -2, 0, 2, 0, 0));
+            TextView hours = text(paid >= 0 ? formatHours(paid) : (record != null && (hasText(record.start) || hasText(record.end)) ? "补录" : "·"), 8,
+                    paid >= 0 ? GREEN : MUTED, paid >= 0);
+            hours.setGravity(Gravity.CENTER);
+            cell.addView(hours, marginParams(-1, -2, 0, 2, 0, 0));
+            calendarGrid.addView(cell, cellParams);
+        }
     }
 
     private void renderDays() {
@@ -716,11 +908,6 @@ public final class MainActivity extends Activity {
         void setOnSwipeListener(OnSwipeListener listener) { this.listener = listener; }
         void setCurrentPage(int currentPage) { this.currentPage = currentPage; }
 
-        @Override protected void onAttachedToWindow() {
-            super.onAttachedToWindow();
-            setCurrentPage(0);
-        }
-
         @Override public boolean onInterceptTouchEvent(MotionEvent event) {
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
                 downX = event.getX();
@@ -731,7 +918,7 @@ public final class MainActivity extends Activity {
                 float deltaX = event.getX() - downX;
                 float deltaY = event.getY() - downY;
                 if (Math.abs(deltaX) > swipeThreshold && Math.abs(deltaX) > Math.abs(deltaY) * 1.35f) {
-                    return (deltaX < 0 && currentPage == 0) || (deltaX > 0 && currentPage == 1);
+                    return (deltaX < 0 && currentPage < 2) || (deltaX > 0 && currentPage > 0);
                 }
             }
             return false;
@@ -807,3 +994,4 @@ public final class MainActivity extends Activity {
         private static boolean hasValue(String value) { return value != null && !value.trim().isEmpty(); }
     }
 }
+

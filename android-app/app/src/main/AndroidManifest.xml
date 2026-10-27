@@ -5,7 +5,7 @@
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@android:drawable/ic_menu_my_calendar"
-        android:label="工时日记"
+        android:label="工时日记 0.0.9"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
         <activity
@@ -19,3 +19,4 @@
         </activity>
     </application>
 </manifest>
+
