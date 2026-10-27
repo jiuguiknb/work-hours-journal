@@ -1,4 +1,3 @@
-Attempting to perform the InitializeDefaultDrives operation on the 'FileSystem' provider failed.
 # 工时日记 Android 版
 
 原生 Android 个人考勤应用。每日记录写入手机本地 SQLite 数据库，不使用浏览器存储，也不需要联网。支持按月查看、工作日/休息日调整、计薪时段自动计算，以及 CSV 导出和恢复。应用会把数据库纳入 Android 系统备份；系统备份是否运行取决于设备的备份设置，建议定期另存 CSV。
@@ -24,4 +23,3 @@ Attempting to perform the InitializeDefaultDrives operation on the 'FileSystem' 
 在应用顶部点击“导出备份”，选择手机上的文件位置保存 CSV。恢复时点击“恢复备份”并选择 CSV；相同日期的内容会被导入记录覆盖。CSV 列格式与网页版本兼容，可从网页版本导出后导入 Android 版。
 
 此版本使用 Android 原生 API，不依赖第三方库。
-
