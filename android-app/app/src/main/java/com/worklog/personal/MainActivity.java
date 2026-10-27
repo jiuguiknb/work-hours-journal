@@ -170,7 +170,7 @@ public final class MainActivity extends Activity {
 
         addSpace(page, 24);
         page.addView(text("每日记录", 17, INK, true));
-        TextView tip = text("上班须在 08:00–09:00 · 下班可填至 24:00", 11, MUTED, false);
+        TextView tip = text("按实际上下班时间记录 · 可提前打卡 · 下班可填至 24:00", 11, MUTED, false);
         tip.setPadding(0, dp(3), 0, dp(10));
         page.addView(tip);
         daysList = column();
@@ -270,12 +270,14 @@ public final class MainActivity extends Activity {
             AttendanceRecord record = records.get(date.toString());
             boolean workday = isWorkday(date, record);
             int paid = getPaidMinutes(record);
-            boolean invalid = record != null && (hasText(record.start) || hasText(record.end)) && paid < 0;
-            boolean future = date.isAfter(today);
+            boolean invalid = record != null && hasText(record.start) && hasText(record.end) && paid < 0;
 
             LinearLayout card = column();
             card.setPadding(dp(13), dp(11), dp(13), dp(12));
             card.setBackground(roundBackground(CARD, 12, LINE));
+            card.setClickable(true);
+            card.setFocusable(true);
+            card.setOnClickListener(v -> showDayDetails(date));
             LinearLayout heading = row();
             LinearLayout dateBadge = column();
             dateBadge.setGravity(Gravity.CENTER);
@@ -294,47 +296,87 @@ public final class MainActivity extends Activity {
             dateText.addView(text(workday ? "工作日 · 目标 8 小时" : "休息日", 10, MUTED, false), marginParams(-1, -2, 0, 3, 0, 0));
             heading.addView(dateText, new LinearLayout.LayoutParams(0, -2, 1));
 
-            String totalLabel = paid >= 0 ? formatHours(paid) + " 小时" : invalid ? "时间需检查" : "未记录";
-            TextView dayTotal = text(totalLabel, 15, invalid ? 0xFFAE5345 : GREEN, true);
+            String totalLabel = paid >= 0 ? formatHours(paid) + " 小时"
+                    : invalid ? "时间需检查"
+                    : record != null && hasText(record.start) && !hasText(record.end) ? "待填下班时间"
+                    : record != null && !hasText(record.start) && hasText(record.end) ? "待填上班时间"
+                    : "未记录";
+            int totalColor = invalid ? 0xFFAE5345
+                    : (record != null && (hasText(record.start) || hasText(record.end)) && paid < 0 ? ORANGE : GREEN);
+            TextView dayTotal = text(totalLabel, 15, totalColor, true);
             dayTotal.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
             heading.addView(dayTotal);
             card.addView(heading);
 
-            LinearLayout controls = row();
-            controls.setGravity(Gravity.CENTER_VERTICAL);
-            TextView startButton = action("上班  " + (hasText(record == null ? null : record.start) ? record.start : "设置时间"), false);
-            startButton.setOnClickListener(v -> showTimePicker(date, true));
-            TextView endButton = action("下班  " + (hasText(record == null ? null : record.end) ? record.end : "设置时间"), false);
-            endButton.setOnClickListener(v -> showTimePicker(date, false));
-            if (future) {
-                startButton.setEnabled(false);
-                endButton.setEnabled(false);
-                startButton.setAlpha(.55f);
-                endButton.setAlpha(.55f);
-            }
-            controls.addView(startButton, new LinearLayout.LayoutParams(0, dp(38), 1));
-            controls.addView(endButton, marginParams(0, 38, 7, 0, 0, 0));
-            TextView toggle = action(workday ? "设为休息日" : "设为工作日", workday);
-            toggle.setTextSize(9);
-            toggle.setOnClickListener(v -> toggleWorkday(date, record));
-            controls.addView(toggle, params(-2, 38));
-            card.addView(controls, marginParams(-1, -2, 0, 9, 0, 0));
-
-            TextView detail = text(dayDetail(record, workday, paid, invalid), 9, invalid ? 0xFFAE5345 : MUTED, false);
-            card.addView(detail, marginParams(-1, -2, 0, 6, 0, 0));
+            String punchSummary = "上班 " + (hasText(record == null ? null : record.start) ? record.start : "--:--")
+                    + "  ·  下班 " + (hasText(record == null ? null : record.end) ? record.end : "--:--");
+            TextView punchText = text(punchSummary, 10, MUTED, false);
+            card.addView(punchText, marginParams(-1, -2, 49, 4, 18, 0));
+            TextView detail = text("点击查看并编辑  ›", 9, invalid ? 0xFFAE5345 : MUTED, false);
+            detail.setGravity(Gravity.RIGHT);
+            card.addView(detail, marginParams(-1, -2, 0, 2, 0, 0));
             daysList.addView(card, marginParams(-1, -2, 0, 0, 0, 7));
         }
     }
 
     private String dayDetail(AttendanceRecord record, boolean workday, int paid, boolean invalid) {
         if (paid >= 0) return (workday ? "已记录" : "休息日补录") + " · 按计薪时段累计";
-        if (invalid) return "上班须为 08:00–09:00，且下班时间晚于上班时间";
+        if (invalid) return "上班和下班时间须有效，且下班时间晚于上班时间";
         if (record != null && hasText(record.start)) return "已录上班时间，请补录下班时间";
         if (record != null && hasText(record.end)) return "已录下班时间，请补录上班时间";
         return workday ? "计薪时段：08:00–12:00 · 13:30–17:30 · 18:00–24:00" : "休息日，可切换为工作日或补录实际工时";
     }
 
-    private void showTimePicker(LocalDate date, boolean isStart) {
+    private void showDayDetails(LocalDate date) {
+        AttendanceRecord record = records.get(date.toString());
+        boolean workday = isWorkday(date, record);
+        int paid = getPaidMinutes(record);
+        boolean invalid = record != null && hasText(record.start) && hasText(record.end) && paid < 0;
+        boolean future = date.isAfter(today);
+
+        LinearLayout content = column();
+        content.setPadding(dp(20), dp(2), dp(20), dp(6));
+        String status = paid >= 0 ? "当天计薪工时 " + formatHours(paid) + " 小时"
+                : dayDetail(record, workday, paid, invalid);
+        TextView statusText = text(status, 12, invalid ? 0xFFAE5345 : (paid >= 0 ? GREEN : MUTED), true);
+        statusText.setPadding(0, 0, 0, dp(12));
+        content.addView(statusText);
+
+        TextView startButton = action("上班打卡     " + (hasText(record == null ? null : record.start) ? record.start : "设置时间"), false);
+        startButton.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
+        startButton.setEnabled(!future);
+        startButton.setAlpha(future ? .55f : 1f);
+        content.addView(startButton, params(-1, 48));
+        TextView endButton = action("下班打卡     " + (hasText(record == null ? null : record.end) ? record.end : "设置时间"), false);
+        endButton.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
+        endButton.setEnabled(!future);
+        endButton.setAlpha(future ? .55f : 1f);
+        content.addView(endButton, marginParams(-1, 48, 0, 9, 0, 0));
+        TextView toggleButton = action(workday ? "设为休息日" : "设为工作日", true);
+        content.addView(toggleButton, marginParams(-1, 44, 0, 14, 0, 0));
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(date.format(DateTimeFormatter.ofPattern("M月d日  EEEE", Locale.CHINA)))
+                .setView(content)
+                .setPositiveButton("完成", null)
+                .create();
+        startButton.setOnClickListener(v -> {
+            dialog.dismiss();
+            showTimePicker(date, true, true);
+        });
+        endButton.setOnClickListener(v -> {
+            dialog.dismiss();
+            showTimePicker(date, false, true);
+        });
+        toggleButton.setOnClickListener(v -> {
+            dialog.dismiss();
+            toggleWorkday(date, record);
+            showDayDetails(date);
+        });
+        dialog.show();
+    }
+
+    private void showTimePicker(LocalDate date, boolean isStart, boolean returnToDetails) {
         AttendanceRecord current = records.get(date.toString());
         String existing = current == null ? null : (isStart ? current.start : current.end);
         int minutes = parseTime(existing, !isStart);
@@ -343,11 +385,18 @@ public final class MainActivity extends Activity {
         TimePickerDialog dialog = new TimePickerDialog(this, (picker, selectedHour, selectedMinute) -> {
             String value = String.format(Locale.US, "%02d:%02d", selectedHour, selectedMinute);
             saveTime(date, isStart, value);
+            if (returnToDetails) showDayDetails(date);
         }, hour, minute, true);
         dialog.setTitle(isStart ? "设置上班打卡时间" : "设置下班打卡时间");
-        dialog.setButton(DialogInterface.BUTTON_NEGATIVE, "清除", (d, which) -> saveTime(date, isStart, null));
+        dialog.setButton(DialogInterface.BUTTON_NEGATIVE, "清除", (d, which) -> {
+            saveTime(date, isStart, null);
+            if (returnToDetails) showDayDetails(date);
+        });
         if (!isStart) {
-            dialog.setButton(DialogInterface.BUTTON_NEUTRAL, "24:00", (d, which) -> saveTime(date, false, "24:00"));
+            dialog.setButton(DialogInterface.BUTTON_NEUTRAL, "24:00", (d, which) -> {
+                saveTime(date, false, "24:00");
+                if (returnToDetails) showDayDetails(date);
+            });
         }
         dialog.show();
     }
@@ -357,13 +406,6 @@ public final class MainActivity extends Activity {
         String start = old == null ? null : old.start;
         String end = old == null ? null : old.end;
         if (isStart) start = value; else end = value;
-        if (isStart && value != null) {
-            int minute = parseTime(value, false);
-            if (minute < 8 * 60 || minute > 9 * 60) {
-                Toast.makeText(this, "上班打卡时间须在 08:00–09:00", Toast.LENGTH_LONG).show();
-                return;
-            }
-        }
         database.save(new AttendanceRecord(date.toString(), start, end, old == null ? null : old.workday));
         render();
     }
@@ -384,9 +426,9 @@ public final class MainActivity extends Activity {
         if (record == null) return -1;
         int start = parseTime(record.start, false);
         int end = parseTime(record.end, true);
-        if (start < 8 * 60 || start > 9 * 60 || end < 0 || end <= start) return -1;
+        if (start < 0 || end < 0 || end <= start) return -1;
         int total = 0;
-        int[][] windows = {{8 * 60, 12 * 60}, {13 * 60 + 30, 17 * 60 + 30}, {18 * 60, 24 * 60}};
+        int[][] windows = {{Math.min(start, 8 * 60), 12 * 60}, {13 * 60 + 30, 17 * 60 + 30}, {18 * 60, 24 * 60}};
         for (int[] window : windows) total += Math.max(0, Math.min(end, window[1]) - Math.max(start, window[0]));
         return total;
     }

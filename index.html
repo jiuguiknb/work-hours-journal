@@ -80,8 +80,9 @@
     .section-head h2 { margin: 0; font-size: 17px; font-weight: 730; letter-spacing: -.02em; }
     .section-head p { margin: 3px 0 0; color: var(--muted); font-size: 11px; }
     .days-list { display: grid; gap: 8px; }
-    .day-card { display: grid; grid-template-columns: minmax(175px, 1fr) minmax(300px, 1.25fr) minmax(105px, .5fr); align-items: center; gap: 20px; min-height: 82px; padding: 13px 16px; border: 1px solid var(--line); border-radius: 13px; background: var(--card); transition: border-color .15s ease, box-shadow .15s ease; }
-    .day-card:hover { border-color: #d1dace; box-shadow: 0 5px 18px #25372b07; }
+    .day-card { position: relative; display: grid; grid-template-columns: minmax(190px, 1fr) minmax(210px, 1fr) minmax(120px, .45fr) 16px; align-items: center; gap: 14px; min-height: 82px; width: 100%; padding: 13px 16px; border: 1px solid var(--line); border-radius: 13px; color: var(--ink); background: var(--card); text-align: left; cursor: pointer; transition: border-color .15s ease, box-shadow .15s ease; }
+    .day-card:hover { border-color: #b8c7ba; box-shadow: 0 5px 18px #25372b07; }
+    .day-card:focus-visible { outline: 3px solid #235b4533; outline-offset: 2px; }
     .day-card.is-weekend { background: #fafaf6; }
     .day-card.is-invalid { border-color: #eac3ba; }
     .day-date { display: flex; align-items: center; min-width: 0; gap: 11px; }
@@ -94,19 +95,34 @@
     .day-tag { padding: 2px 6px; border-radius: 5px; color: var(--green); background: var(--mint); font-size: 9px; font-weight: 650; }
     .day-tag.rest { color: #777f78; background: #efefe9; }
     .day-subtitle { margin-top: 3px; color: var(--muted); font-size: 10px; }
-    .day-toggle { margin-top: 3px; padding: 0; border: 0; color: #839087; background: none; font-size: 10px; cursor: pointer; }
-    .day-toggle:hover { color: var(--green); text-decoration: underline; }
-    .punches { display: flex; align-items: center; gap: 9px; }
-    .punch-field { min-width: 0; flex: 1; }
-    .punch-field label { display: block; margin: 0 0 4px 2px; color: #7f8881; font-size: 9px; }
-    .punch-field input { width: 100%; min-width: 0; height: 34px; padding: 0 9px; border: 1px solid var(--line); border-radius: 8px; outline: none; color: var(--ink); background: #fff; font-size: 12px; font-variant-numeric: tabular-nums; }
-    .punch-field input:focus { border-color: #69907a; box-shadow: 0 0 0 3px #235b4511; }
-    .punch-field input:disabled { color: #a5aaa4; background: #f4f4ef; cursor: not-allowed; }
-    .punch-arrow { align-self: end; padding-bottom: 9px; color: #a2aaa2; font-size: 12px; }
+    .day-times { min-width: 0; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+    .day-times strong { color: var(--ink); font-weight: 620; }
+    .day-open-hint { color: #98a198; font-size: 10px; }
+    .day-chevron { color: #9ba49b; font-size: 22px; text-align: right; }
     .day-total { text-align: right; }
     .day-total strong { display: block; font-size: 18px; font-weight: 720; letter-spacing: -.04em; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .day-total span { display: block; margin-top: 2px; color: var(--muted); font-size: 10px; }
     .day-total .error { color: var(--red); }
+    .day-total .pending { color: var(--orange); }
+    .day-dialog { width: min(440px, calc(100% - 28px)); max-width: 440px; padding: 0; border: 1px solid var(--line); border-radius: 18px; color: var(--ink); background: var(--card); box-shadow: 0 24px 80px #17261a33; }
+    .day-dialog::backdrop { background: #17261a66; backdrop-filter: blur(3px); }
+    .dialog-content { padding: 24px; }
+    .dialog-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+    .dialog-top h3 { margin: 0; font-size: 19px; }
+    .dialog-subtitle { margin-top: 4px; color: var(--muted); font-size: 12px; }
+    .dialog-close { border: 0; width: 34px; height: 34px; border-radius: 9px; color: var(--muted); background: #f3f3ed; cursor: pointer; font-size: 20px; }
+    .dialog-status { margin: 18px 0 14px; padding: 11px 13px; border-radius: 10px; color: var(--green-dark); background: var(--mint); font-size: 12px; }
+    .dialog-status.error { color: var(--red); background: #fff1ee; }
+    .dialog-status.pending { color: #946239; background: var(--orange-light); }
+    .dialog-times { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .dialog-field label { display: block; margin-bottom: 5px; color: var(--muted); font-size: 11px; }
+    .dialog-field input { width: 100%; height: 44px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px; outline: none; color: var(--ink); background: white; font-size: 16px; font-variant-numeric: tabular-nums; }
+    .dialog-field input:focus { border-color: #69907a; box-shadow: 0 0 0 3px #235b4511; }
+    .dialog-help { margin-top: 8px; color: var(--muted); font-size: 10px; }
+    .dialog-error { min-height: 18px; margin-top: 7px; color: var(--red); font-size: 11px; }
+    .dialog-actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 9px; margin-top: 18px; }
+    .dialog-actions .button { min-height: 42px; }
+    .button-danger { color: var(--red); }
     .policy { display: grid; grid-template-columns: .85fr 1.65fr; gap: 25px; margin-top: 26px; padding: 19px 21px; border: 1px solid var(--line); border-radius: 15px; background: #eeeee7; }
     .policy h3 { margin: 0 0 5px; font-size: 12px; font-weight: 750; }
     .policy p { margin: 0; color: var(--muted); font-size: 10px; }
@@ -120,8 +136,8 @@
     .empty-note { margin: 20px 0; color: var(--muted); font-size: 12px; }
     @media (max-width: 820px) {
       .overview { grid-template-columns: repeat(2, 1fr); }
-      .day-card { grid-template-columns: minmax(150px, .8fr) minmax(260px, 1.2fr); gap: 10px 16px; }
-      .day-total { grid-column: 2; display: flex; align-items: baseline; justify-content: space-between; text-align: left; }
+      .day-card { grid-template-columns: minmax(150px, 1fr) minmax(170px, 1fr) auto 14px; gap: 10px; }
+      .day-total { text-align: right; }
       .day-total span { margin: 0; }
       .policy { grid-template-columns: 1fr; gap: 13px; }
     }
@@ -137,12 +153,13 @@
       .stat-value { font-size: 23px; }
       .progress-panel { grid-template-columns: 1fr; gap: 15px; padding: 16px; }
       .progress-side { padding: 12px 0 0; border-left: 0; border-top: 1px solid #ffffff2b; }
-      .day-card { grid-template-columns: 1fr auto; gap: 12px 8px; padding: 12px; }
+      .day-card { grid-template-columns: minmax(0, 1fr) auto 14px; gap: 8px; padding: 12px; }
       .day-date { grid-column: 1; }
-      .day-total { grid-column: 2; grid-row: 1; display: block; text-align: right; }
+      .day-times { grid-column: 1; padding-left: 50px; margin-top: -5px; }
+      .day-total { grid-column: 2; grid-row: 1 / span 2; text-align: right; }
       .day-total span { display: block; margin-top: 2px; }
-      .punches { grid-column: 1 / -1; }
-      .punch-field input { height: 37px; }
+      .day-chevron { grid-column: 3; grid-row: 1 / span 2; }
+      .dialog-content { padding: 20px; }
       .footer { flex-direction: column; gap: 5px; }
     }
     @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; } }
@@ -197,7 +214,7 @@
 
     <section aria-labelledby="daysTitle">
       <div class="section-head">
-        <div><h2 id="daysTitle">每日记录</h2><p>上班时间须在 08:00–09:00；下班时间可填至 24:00 前。</p></div>
+        <div><h2 id="daysTitle">每日记录</h2><p>按实际上下班时间记录 · 可提前打卡 · 下班可填至 24:00</p></div>
         <p id="dataHint">数据仅保存在这台设备的浏览器中</p>
       </div>
       <div class="days-list" id="daysList"></div>
@@ -215,6 +232,26 @@
     </section>
     <footer class="footer"><span>目标：每个工作日 8 小时 · 周末默认休息，可按需切换</span><span>本地保存 · 可随时导出 CSV 备份</span></footer>
   </main>
+  <dialog class="day-dialog" id="dayDialog" aria-labelledby="dialogTitle">
+    <form class="dialog-content" id="dayForm">
+      <div class="dialog-top">
+        <div><h3 id="dialogTitle">每日记录</h3><div class="dialog-subtitle" id="dialogSubtitle"></div></div>
+        <button class="dialog-close" id="closeDialog" type="button" aria-label="关闭">×</button>
+      </div>
+      <div class="dialog-status" id="dialogStatus"></div>
+      <div class="dialog-times">
+        <div class="dialog-field"><label for="dialogStart">上班打卡</label><input id="dialogStart" type="time" step="60"></div>
+        <div class="dialog-field"><label for="dialogEnd">下班打卡</label><input id="dialogEnd" type="text" inputmode="numeric" maxlength="5" placeholder="18:00 或 24:00" aria-describedby="dialogHelp"></div>
+      </div>
+      <div class="dialog-help" id="dialogHelp">上下班按实际时间填写；计薪时段外的休息时间会自动扣除。</div>
+      <div class="dialog-error" id="dialogError" aria-live="polite"></div>
+      <div class="dialog-actions">
+        <button class="button button-primary" id="saveDay" type="submit">保存记录</button>
+        <button class="button button-primary" id="toggleDay" type="button">设为休息日</button>
+        <button class="button button-danger" id="clearDay" type="button">清除打卡</button>
+      </div>
+    </form>
+  </dialog>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <script>
@@ -227,6 +264,7 @@
       const monthState = new Date(today.getFullYear(), today.getMonth(), 1);
       let data = loadData();
       let toastTimer;
+      let activeDayKey = null;
       const $ = id => document.getElementById(id);
 
       function loadData() {
@@ -269,8 +307,9 @@
       function computeMinutes(record) {
         const start = parseTime(record.start);
         const end = parseTime(record.end, true);
-        if (start === null || end === null || start < 8 * 60 || start > 9 * 60 || end <= start) return null;
-        return PAID_WINDOWS.reduce((sum, [from, to]) => sum + Math.max(0, Math.min(end, to) - Math.max(start, from)), 0);
+        if (start === null || end === null || end <= start) return null;
+        const windows = [[Math.min(start, 8 * 60), 12 * 60], ...PAID_WINDOWS.slice(1)];
+        return windows.reduce((sum, [from, to]) => sum + Math.max(0, Math.min(end, to) - Math.max(start, from)), 0);
       }
       function dateLabel(date) {
         return new Intl.DateTimeFormat('zh-CN', { weekday: 'short' }).format(date);
@@ -346,11 +385,14 @@
           const workday = isWorkday(date, record);
           const future = isFuture(date);
           const minutes = computeMinutes(record);
-          const hasAnyPunch = Boolean(record.start || record.end);
-          const invalid = hasAnyPunch && minutes === null && Boolean(record.start && record.end);
-          const article = document.createElement('article');
+          const hasStart = Boolean(record.start);
+          const hasEnd = Boolean(record.end);
+          const invalid = hasStart && hasEnd && minutes === null;
+          const article = document.createElement('button');
+          article.type = 'button';
           article.className = `day-card${!workday ? ' is-weekend' : ''}${invalid ? ' is-invalid' : ''}`;
           article.dataset.key = key;
+          article.setAttribute('aria-label', `${month + 1} 月 ${day} 日，${workday ? '工作日' : '休息日'}，点击查看或编辑`);
           const dayTitle = `${month + 1} 月 ${day} 日`;
           let status = workday ? '工作日' : '休息日';
           let result = workday && !future ? '待记录' : future ? '未开始' : '休息日';
@@ -360,25 +402,30 @@
           } else if (invalid) {
             result = '时间需检查';
             resultClass = 'error';
-          } else if (record.start && !record.end) {
+          } else if (hasStart && !hasEnd) {
             result = '待填下班时间';
-          } else if (!record.start && record.end) {
+            resultClass = 'pending';
+          } else if (!hasStart && hasEnd) {
             result = '待填上班时间';
+            resultClass = 'pending';
           } else if (workday && !future) {
             result = '未打卡';
           }
-          const smallResult = minutes !== null ? `${workday ? '已记录' : '休息日补录'} · 计薪时段` : invalid ? '上班须为 08:00–09:00，且下班晚于上班' : '根据计薪时段自动计算';
+          const punchLabel = [hasStart ? `上班 ${record.start}` : '上班 --:--', hasEnd ? `下班 ${record.end}` : '下班 --:--'].join('  ·  ');
+          const smallResult = minutes !== null ? `${workday ? '已记录' : '休息日补录'} · 按计薪时段累计` : invalid ? '下班时间须晚于上班时间' : hasStart && !hasEnd ? '已录上班时间，请补录下班时间' : !hasStart && hasEnd ? '已录下班时间，请补录上班时间' : '点击设置打卡时间';
           article.innerHTML = `
             <div class="day-date">
               <div class="day-number"><strong>${String(day).padStart(2, '0')}</strong><span>${dateLabel(date)}</span></div>
-              <div class="day-meta"><div class="day-title">${dayTitle}<span class="day-tag${workday ? '' : ' rest'}">${status}</span></div><div class="day-subtitle">${workday ? '每日目标 8 小时' : '可将休息日切换为工作日'}</div><button class="day-toggle" type="button" data-action="toggle-day">${workday ? '设为休息日' : '设为工作日'}</button></div>
+              <div class="day-meta"><div class="day-title">${dayTitle}<span class="day-tag${workday ? '' : ' rest'}">${status}</span></div><div class="day-subtitle">${workday ? '每日目标 8 小时' : '休息日'}</div></div>
             </div>
-            <div class="punches">
-              <div class="punch-field"><label for="start-${key}">上班打卡</label><input id="start-${key}" type="time" min="08:00" max="09:00" step="60" value="${record.start || ''}" aria-label="${dayTitle}上班打卡时间" ${future ? 'disabled' : ''}></div>
-              <span class="punch-arrow" aria-hidden="true">→</span>
-              <div class="punch-field"><label for="end-${key}">下班打卡</label><input id="end-${key}" type="text" inputmode="numeric" maxlength="5" placeholder="18:00" value="${record.end || ''}" aria-label="${dayTitle}下班打卡时间（HH:MM，可填 24:00）" ${future ? 'disabled' : ''}></div>
-            </div>
+            <div class="day-times"><strong>${punchLabel}</strong><div class="day-open-hint">点击进入详情设置</div></div>
             <div class="day-total"><strong>${result}</strong><span class="${resultClass}">${smallResult}</span></div>`;
+          const chevron = document.createElement('span');
+          chevron.className = 'day-chevron';
+          chevron.setAttribute('aria-hidden', 'true');
+          chevron.textContent = '›';
+          article.append(chevron);
+          article.addEventListener('click', () => openDayDialog(key));
           fragment.append(article);
         }
         list.replaceChildren(fragment);
@@ -390,24 +437,79 @@
         saveData();
         render();
       }
-      $('daysList').addEventListener('change', event => {
-        const input = event.target;
-        if (!(input instanceof HTMLInputElement)) return;
-        const key = input.closest('.day-card')?.dataset.key;
-        if (!key) return;
-        const property = input.id.startsWith('start-') ? 'start' : 'end';
-        updateRecord(key, property, input.value);
-      });
-      $('daysList').addEventListener('click', event => {
-        const button = event.target.closest('[data-action="toggle-day"]');
-        if (!button) return;
-        const key = button.closest('.day-card').dataset.key;
+      function openDayDialog(key) {
+        activeDayKey = key;
+        const dialog = $('dayDialog');
+        const [year, month, day] = key.split('-').map(Number);
+        const date = new Date(year, month - 1, day);
+        const record = getDayRecord(key);
+        const workday = isWorkday(date, record);
+        const future = isFuture(date);
+        const minutes = computeMinutes(record);
+        const hasStart = Boolean(record.start);
+        const hasEnd = Boolean(record.end);
+        const invalid = hasStart && hasEnd && minutes === null;
+        $('dialogTitle').textContent = `${month} 月 ${day} 日 · ${dateLabel(date)}`;
+        $('dialogSubtitle').textContent = workday ? '工作日 · 目标 8 小时' : '休息日 · 可补录实际工时';
+        $('dialogStart').value = record.start || '';
+        $('dialogEnd').value = record.end || '';
+        $('dialogStart').disabled = future;
+        $('dialogEnd').disabled = future;
+        $('saveDay').disabled = future;
+        $('clearDay').disabled = future;
+        $('toggleDay').textContent = workday ? '设为休息日' : '设为工作日';
+        $('dialogError').textContent = '';
+        const status = $('dialogStatus');
+        status.className = 'dialog-status';
+        if (minutes !== null) status.textContent = `当天计薪工时 ${formatHours(minutes)} 小时`;
+        else if (invalid) { status.textContent = '时间需检查'; status.classList.add('error'); }
+        else if (hasStart && !hasEnd) { status.textContent = '已录上班时间，请补录下班时间'; status.classList.add('pending'); }
+        else if (!hasStart && hasEnd) { status.textContent = '已录下班时间，请补录上班时间'; status.classList.add('pending'); }
+        else status.textContent = workday ? '工作日 · 每日目标 8 小时' : '休息日';
+        if (!dialog.open) dialog.showModal();
+      }
+      function commitDialog(showSuccess = true) {
+        const key = activeDayKey;
+        if (!key) return false;
+        const start = $('dialogStart').value.trim();
+        const end = $('dialogEnd').value.trim();
+        const startMinutes = start ? parseTime(start) : null;
+        const endMinutes = end ? parseTime(end, true) : null;
+        let error = '';
+        if (start && startMinutes === null) error = '上班时间格式无效，请使用 HH:MM。';
+        else if (end && endMinutes === null) error = '下班时间格式无效，可填写 24:00。';
+        else if (start && end && endMinutes <= startMinutes) error = '下班时间须晚于上班时间。';
+        if (error) { $('dialogError').textContent = error; return false; }
+        const previous = getDayRecord(key);
+        const next = { ...previous, start: start || '', end: end || '' };
+        if (!next.start && !next.end && typeof next.workday !== 'boolean') delete data[key];
+        else data[key] = next;
+        saveData();
+        render();
+        openDayDialog(key);
+        if (showSuccess) showToast('当天记录已保存');
+        return true;
+      }
+      $('dayForm').addEventListener('submit', event => { event.preventDefault(); commitDialog(); });
+      $('closeDialog').addEventListener('click', () => $('dayDialog').close());
+      $('dayDialog').addEventListener('click', event => { if (event.target === $('dayDialog')) $('dayDialog').close(); });
+      $('dialogStart').addEventListener('input', () => { $('dialogError').textContent = ''; });
+      $('dialogEnd').addEventListener('input', () => { $('dialogError').textContent = ''; });
+      $('toggleDay').addEventListener('click', () => {
+        if (!commitDialog(false)) return;
+        const key = activeDayKey;
         const [year, month, day] = key.split('-').map(Number);
         const date = new Date(year, month - 1, day);
         const record = getDayRecord(key);
         data[key] = { ...record, workday: !isWorkday(date, record) };
         saveData();
         render();
+        openDayDialog(key);
+      });
+      $('clearDay').addEventListener('click', () => {
+        $('dialogStart').value = '';
+        $('dialogEnd').value = '';
+        commitDialog();
       });
       $('prevMonth').addEventListener('click', () => { monthState.setMonth(monthState.getMonth() - 1); render(); });
       $('nextMonth').addEventListener('click', () => { monthState.setMonth(monthState.getMonth() + 1); render(); });
