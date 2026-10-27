@@ -1,0 +1,33 @@
+Attempting to perform the InitializeDefaultDrives operation on the 'FileSystem' provider failed.
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+      - name: Install Android API 34
+        run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '8.2'
+      - name: Build debug APK
+        working-directory: android-app
+        run: gradle --no-daemon assembleDebug
+      - uses: actions/upload-artifact@v7
+        with:
+          name: work-hours-journal-debug-apk
+          path: android-app/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
+
