@@ -1,4 +1,3 @@
-Attempting to perform the InitializeDefaultDrives operation on the 'FileSystem' provider failed.
 # 工时日记
 
 一款离线可用的个人考勤网页应用。填写每天的上班、下班打卡时间，自动按公司的计薪时段计算工时，并汇总月度目标、工作日均工时和当前欠工时。
@@ -21,4 +20,3 @@ Attempting to perform the InitializeDefaultDrives operation on the 'FileSystem' 
 ## 构建
 
 应用是一个自包含的静态网页，`index.html` 即为可运行的构建产物。
-
