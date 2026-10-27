@@ -2,6 +2,7 @@ package com.worklog.personal;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.animation.ValueAnimator;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.database.Cursor;
@@ -11,9 +12,15 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
+import android.security.keystore.KeyGenParameterSpec;
+import android.security.keystore.KeyProperties;
+import android.text.InputType;
+import android.util.Base64;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.animation.DecelerateInterpolator;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.GridLayout;
 import android.widget.LinearLayout;
@@ -22,20 +29,40 @@ import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import org.json.JSONException;
+import org.json.JSONObject;
+
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
+import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.security.KeyStore;
+import java.security.MessageDigest;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.GCMParameterSpec;
 
 public final class MainActivity extends Activity {
     private static final int REQUEST_EXPORT = 41;
@@ -49,9 +76,13 @@ public final class MainActivity extends Activity {
     private static final int LINE = 0xFFE7E8DF;
     private static final int MINT = 0xFFE7F1E8;
     private static final int ORANGE = 0xFFD77B42;
-    private static final String APP_VERSION = "0.0.10";
+    private static final String APP_VERSION = "0.0.11";
+    private static final String SYNC_PREFS = "webdav_sync";
+    private static final String SECRET_ALIAS = "work_hours_webdav_password";
 
     private final DateTimeFormatter monthFormatter = DateTimeFormatter.ofPattern("yyyy年M月", Locale.CHINA);
+    private final ExecutorService syncExecutor = Executors.newSingleThreadExecutor();
+    private final Object databaseLock = new Object();
     private LocalDate shownMonth = LocalDate.now().withDayOfMonth(1);
     private LocalDate today;
     private AttendanceDatabase database;
@@ -80,6 +111,9 @@ public final class MainActivity extends Activity {
     private View progressRemainder;
     private TextView progressDays;
     private TextView progressPending;
+    private TextView quickPunchButton;
+    private TextView syncStatusView;
+    private ValueAnimator progressAnimator;
     private boolean focusTodayOnRender = true;
     private boolean scrollDaysToTopOnRender;
     private boolean showMinutes;
@@ -97,6 +131,7 @@ public final class MainActivity extends Activity {
                 View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         setContentView(createPage());
         render();
+        if (hasWebDavConfig()) queueSync(false, true);
     }
 
     @Override
@@ -111,6 +146,12 @@ public final class MainActivity extends Activity {
         } else {
             today = resumedToday;
         }
+    }
+
+    @Override
+    protected void onDestroy() {
+        syncExecutor.shutdownNow();
+        super.onDestroy();
     }
 
     private View createPage() {
@@ -303,8 +344,11 @@ public final class MainActivity extends Activity {
         dailyHeading.addView(text("每日记录", 16, INK, true), new LinearLayout.LayoutParams(0, -2, 1));
         dailyHeading.addView(text("状态可点切换", 9, MUTED, false));
         page.addView(dailyHeading);
-        TextView tip = text("按实际上下班时间记录 · 可提前打卡 · 下班可填至 24:00", 10, MUTED, false);
-        tip.setPadding(0, dp(3), 0, dp(7));
+        quickPunchButton = action("上班打卡", true);
+        quickPunchButton.setTextSize(12);
+        page.addView(quickPunchButton, marginParams(-1, 42, 0, 7, 0, 0));
+        TextView tip = text("快捷按钮记录手机当前时间 · 点日期卡片可编辑或补录", 10, MUTED, false);
+        tip.setPadding(0, dp(4), 0, dp(7));
         page.addView(tip);
         daysScroll = new ScrollView(this);
         daysScroll.setFillViewport(false);
@@ -321,7 +365,7 @@ public final class MainActivity extends Activity {
         page.addView(top);
         addSpace(page, 21);
         page.addView(text("工具与备份", 24, INK, true));
-        TextView toolHint = text("记录只保存在这台手机的本地数据库中。建议定期导出备份。", 12, MUTED, false);
+        TextView toolHint = text("记录保存在手机本地；也可配置 WebDAV 自动同步，并保留 CSV 备份。", 12, MUTED, false);
         toolHint.setPadding(0, dp(6), 0, dp(18));
         page.addView(toolHint);
 
@@ -333,6 +377,28 @@ public final class MainActivity extends Activity {
         backupButton.setTextSize(13);
         backupButton.setOnClickListener(v -> chooseBackup());
         page.addView(backupButton, marginParams(-1, 50, 0, 10, 0, 0));
+
+        addSpace(page, 20);
+        LinearLayout syncCard = column();
+        syncCard.setPadding(dp(15), dp(14), dp(15), dp(14));
+        syncCard.setBackground(roundBackground(CARD, 14, LINE));
+        syncCard.addView(text("WebDAV 云同步", 14, INK, true));
+        TextView syncHelp = text("启动时拉取，记录修改后自动同步。按日期比较内容哈希；冲突时可选择保留本机或服务器版本。", 11, MUTED, false);
+        syncHelp.setLineSpacing(dp(3), 1f);
+        syncHelp.setPadding(0, dp(5), 0, dp(8));
+        syncCard.addView(syncHelp);
+        syncStatusView = text(hasWebDavConfig() ? "已配置 · 等待同步" : "尚未配置服务器", 10, MUTED, false);
+        syncStatusView.setPadding(0, 0, 0, dp(9));
+        syncCard.addView(syncStatusView);
+        TextView syncButton = action("立即同步", true);
+        syncButton.setTextSize(12);
+        syncButton.setOnClickListener(v -> queueSync(true));
+        syncCard.addView(syncButton, params(-1, 44));
+        TextView configureButton = action("设置 WebDAV", false);
+        configureButton.setTextSize(12);
+        configureButton.setOnClickListener(v -> showWebDavSettings());
+        syncCard.addView(configureButton, marginParams(-1, 44, 0, 8, 0, 0));
+        page.addView(syncCard);
 
         addSpace(page, 22);
         LinearLayout policy = column();
@@ -352,9 +418,29 @@ public final class MainActivity extends Activity {
 
     private void showPage(int page) {
         if (pageContainer == null || pageContainer.getChildCount() < 3) return;
+        int previousPage = currentPage;
         currentPage = Math.max(0, Math.min(2, page));
+        boolean changed = previousPage != currentPage;
         for (int index = 0; index < pageContainer.getChildCount(); index++) {
-            pageContainer.getChildAt(index).setVisibility(index == currentPage ? View.VISIBLE : View.GONE);
+            View child = pageContainer.getChildAt(index);
+            if (index == currentPage) {
+                child.animate().cancel();
+                child.setVisibility(View.VISIBLE);
+                if (changed) {
+                    child.setAlpha(0f);
+                    child.setTranslationX(dp(currentPage > previousPage ? 14 : -14));
+                    child.animate().alpha(1f).translationX(0f).setDuration(210)
+                            .setInterpolator(new DecelerateInterpolator()).start();
+                } else {
+                    child.setAlpha(1f);
+                    child.setTranslationX(0f);
+                }
+            } else {
+                child.animate().cancel();
+                child.setVisibility(View.GONE);
+                child.setAlpha(1f);
+                child.setTranslationX(0f);
+            }
         }
         pageContainer.setCurrentPage(currentPage);
         for (int index = 0; index < navigationItems.size(); index++) {
@@ -455,16 +541,75 @@ public final class MainActivity extends Activity {
         calendarSummary.setText("工作日 " + fullMonthDays + " 天 · 休息日 " + restDays + " 天\n已记录 " + formatDuration(monthActual) + " · 月目标 " + formatDuration(goal) + "\n已记录工作日 " + recordedDays + " 天 · 待补录 " + pending + " 天");
         progressLabel.setText(percent + "%");
         float fraction = expected == 0 ? 0 : Math.min(1f, (float) actual / expected);
-        LinearLayout.LayoutParams fillParams = (LinearLayout.LayoutParams) progressFill.getLayoutParams();
-        fillParams.width = 0;
-        fillParams.weight = fraction;
-        progressFill.setLayoutParams(fillParams);
-        LinearLayout.LayoutParams remainderParams = (LinearLayout.LayoutParams) progressRemainder.getLayoutParams();
-        remainderParams.width = 0;
-        remainderParams.weight = Math.max(0.001f, 1f - fraction);
-        progressRemainder.setLayoutParams(remainderParams);
+        animateProgress(fraction);
         progressDays.setText((expectedDays - pending) + "/" + expectedDays + " 个工作日已记录");
         progressPending.setText(pending + " 天待补录");
+        renderQuickPunchButton();
+    }
+
+    private void animateProgress(float target) {
+        if (progressFill == null || progressRemainder == null) return;
+        if (progressAnimator != null) progressAnimator.cancel();
+        LinearLayout.LayoutParams current = (LinearLayout.LayoutParams) progressFill.getLayoutParams();
+        float start = current.weight;
+        progressAnimator = ValueAnimator.ofFloat(start, target);
+        progressAnimator.setDuration(280);
+        progressAnimator.setInterpolator(new DecelerateInterpolator());
+        progressAnimator.addUpdateListener(animator -> {
+            float fraction = (float) animator.getAnimatedValue();
+            LinearLayout.LayoutParams fillParams = (LinearLayout.LayoutParams) progressFill.getLayoutParams();
+            fillParams.width = 0;
+            fillParams.weight = fraction;
+            progressFill.setLayoutParams(fillParams);
+            LinearLayout.LayoutParams remainderParams = (LinearLayout.LayoutParams) progressRemainder.getLayoutParams();
+            remainderParams.width = 0;
+            remainderParams.weight = Math.max(0.001f, 1f - fraction);
+            progressRemainder.setLayoutParams(remainderParams);
+        });
+        progressAnimator.start();
+    }
+
+    private void renderQuickPunchButton() {
+        if (quickPunchButton == null) return;
+        AttendanceRecord record = records.get(today.toString());
+        boolean hasStart = record != null && hasText(record.start);
+        if (!hasStart) {
+            quickPunchButton.setText("上班打卡  ·  使用当前时间");
+        } else if (record == null || !hasText(record.end)) {
+            quickPunchButton.setText("下班打卡  ·  使用当前时间");
+        } else {
+            quickPunchButton.setText("更新签退  ·  使用当前时间");
+        }
+        quickPunchButton.setContentDescription(hasStart
+                ? "点击使用当前时间签退；之后可再次点击更新签退时间"
+                : "点击使用当前时间记录上班打卡");
+        quickPunchButton.setOnClickListener(v -> punchCurrentTime());
+    }
+
+    private void punchCurrentTime() {
+        today = LocalDate.now();
+        if (shownMonth.getYear() != today.getYear() || shownMonth.getMonthValue() != today.getMonthValue()) {
+            shownMonth = today.withDayOfMonth(1);
+            focusTodayOnRender = true;
+            render();
+        }
+        String now = java.time.LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm", Locale.US));
+        boolean signIn;
+        synchronized (databaseLock) {
+            AttendanceRecord record = database.loadOne(today.toString());
+            signIn = record == null || !hasText(record.start);
+            if (!signIn && parseTime(now, false) <= parseTime(record.start, false)) {
+                Toast.makeText(this, "当前时间不晚于上班时间，请检查打卡记录", Toast.LENGTH_LONG).show();
+                return;
+            }
+            database.save(signIn
+                    ? new AttendanceRecord(today.toString(), now, null, record == null ? null : record.workday)
+                    : new AttendanceRecord(today.toString(), record.start, now, record.workday));
+        }
+        records = database.loadMonth(shownMonth.getYear(), shownMonth.getMonthValue());
+        render();
+        queueSync(false);
+        Toast.makeText(this, signIn ? "已记录上班时间 " + now : "已更新签退时间 " + now, Toast.LENGTH_SHORT).show();
     }
 
     private void renderCalendar() {
@@ -759,18 +904,26 @@ public final class MainActivity extends Activity {
     }
 
     private void saveTime(LocalDate date, boolean isStart, String value) {
-        AttendanceRecord old = records.get(date.toString());
-        String start = old == null ? null : old.start;
-        String end = old == null ? null : old.end;
-        if (isStart) start = value; else end = value;
-        database.save(new AttendanceRecord(date.toString(), start, end, old == null ? null : old.workday));
+        synchronized (databaseLock) {
+            AttendanceRecord old = database.loadOne(date.toString());
+            String start = old == null ? null : old.start;
+            String end = old == null ? null : old.end;
+            if (isStart) start = value; else end = value;
+            database.save(new AttendanceRecord(date.toString(), start, end, old == null ? null : old.workday));
+        }
         render();
+        queueSync(false);
     }
 
     private void toggleWorkday(LocalDate date, AttendanceRecord old) {
-        boolean value = !isWorkday(date, old);
-        database.save(new AttendanceRecord(date.toString(), old == null ? null : old.start, old == null ? null : old.end, value));
+        synchronized (databaseLock) {
+            AttendanceRecord current = database.loadOne(date.toString());
+            boolean value = !isWorkday(date, current);
+            database.save(new AttendanceRecord(date.toString(), current == null ? null : current.start,
+                    current == null ? null : current.end, value));
+        }
         render();
+        queueSync(false);
     }
 
     private boolean isWorkday(LocalDate date, AttendanceRecord record) {
@@ -817,6 +970,499 @@ public final class MainActivity extends Activity {
             toggleDurationUnit();
             view.setContentDescription("点击切换工时单位；当前显示" + (showMinutes ? "分钟" : "小时"));
         });
+    }
+
+    private boolean hasWebDavConfig() {
+        return !getSharedPreferences(SYNC_PREFS, MODE_PRIVATE).getString("url", "").trim().isEmpty();
+    }
+
+    private void showWebDavSettings() {
+        android.content.SharedPreferences preferences = getSharedPreferences(SYNC_PREFS, MODE_PRIVATE);
+        EditText urlField = new EditText(this);
+        urlField.setSingleLine(true);
+        urlField.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        urlField.setHint("https://服务器/WebDAV/工时日记.json");
+        urlField.setText(preferences.getString("url", ""));
+        EditText usernameField = new EditText(this);
+        usernameField.setSingleLine(true);
+        usernameField.setHint("用户名（可留空）");
+        usernameField.setText(preferences.getString("username", ""));
+        EditText passwordField = new EditText(this);
+        passwordField.setSingleLine(true);
+        passwordField.setHint("密码或应用专用密码");
+        passwordField.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        try {
+            String encrypted = preferences.getString("password", "");
+            if (!encrypted.isEmpty()) passwordField.setText(decryptSecret(encrypted));
+        } catch (Exception exception) {
+            Toast.makeText(this, "无法读取已保存的密码，请重新填写", Toast.LENGTH_LONG).show();
+        }
+
+        LinearLayout content = column();
+        content.setPadding(dp(20), dp(2), dp(20), dp(4));
+        content.addView(text("填写可读写的 WebDAV 同步文件完整地址。每个日期单独按记录内容比较；不会用修改时间判断新旧。", 11, MUTED, false));
+        content.addView(text("同步地址", 11, INK, true), marginParams(-1, -2, 0, 13, 0, 0));
+        content.addView(urlField, params(-1, 48));
+        content.addView(text("用户名", 11, INK, true), marginParams(-1, -2, 0, 7, 0, 0));
+        content.addView(usernameField, params(-1, 48));
+        content.addView(text("密码", 11, INK, true), marginParams(-1, -2, 0, 7, 0, 0));
+        content.addView(passwordField, params(-1, 48));
+        TextView securityHint = text("支持 HTTP 和 HTTPS。HTTP 不加密登录信息，建议使用 HTTPS 或应用专用密码。", 10, ORANGE, false);
+        securityHint.setPadding(0, dp(10), 0, 0);
+        content.addView(securityHint);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("WebDAV 设置")
+                .setView(content)
+                .setNegativeButton("取消", null)
+                .setNeutralButton("清除配置", null)
+                .setPositiveButton("保存并同步", null)
+                .create();
+        dialog.setOnShowListener(ignored -> {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                String endpoint = urlField.getText().toString().trim();
+                if (!(endpoint.startsWith("https://") || endpoint.startsWith("http://"))) {
+                    urlField.setError("请输入 http:// 或 https:// 开头的完整文件地址");
+                    return;
+                }
+                try {
+                    URL parsed = new URL(endpoint);
+                    if (parsed.getHost().isEmpty()) throw new IllegalArgumentException("缺少服务器主机名");
+                    String oldEndpoint = preferences.getString("url", "");
+                    android.content.SharedPreferences.Editor editor = preferences.edit()
+                            .putString("url", endpoint)
+                            .putString("username", usernameField.getText().toString().trim());
+                    String password = passwordField.getText().toString();
+                    if (password.isEmpty()) editor.remove("password");
+                    else editor.putString("password", encryptSecret(password));
+                    if (!endpoint.equals(oldEndpoint)) editor.remove("base_hashes").remove("last_generation");
+                    editor.apply();
+                    dialog.dismiss();
+                    setSyncStatus("设置已保存，正在同步…");
+                    queueSync(false);
+                } catch (Exception exception) {
+                    urlField.setError("地址或密码设置无效：" + exception.getMessage());
+                }
+            });
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+                preferences.edit().remove("url").remove("username").remove("password").apply();
+                dialog.dismiss();
+                setSyncStatus("WebDAV 配置已清除；本机记录仍保留");
+            });
+        });
+        dialog.show();
+    }
+
+    private String encryptSecret(String value) throws Exception {
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        cipher.init(Cipher.ENCRYPT_MODE, loadSecretKey());
+        byte[] encrypted = cipher.doFinal(value.getBytes(StandardCharsets.UTF_8));
+        byte[] iv = cipher.getIV();
+        ByteBuffer buffer = ByteBuffer.allocate(1 + iv.length + encrypted.length);
+        buffer.put((byte) iv.length).put(iv).put(encrypted);
+        return Base64.encodeToString(buffer.array(), Base64.NO_WRAP);
+    }
+
+    private String decryptSecret(String value) throws Exception {
+        byte[] encoded = Base64.decode(value, Base64.NO_WRAP);
+        ByteBuffer buffer = ByteBuffer.wrap(encoded);
+        int ivLength = buffer.get() & 0xFF;
+        if (ivLength < 8 || ivLength > 16 || buffer.remaining() <= ivLength) throw new IllegalArgumentException("密码数据无效");
+        byte[] iv = new byte[ivLength];
+        buffer.get(iv);
+        byte[] encrypted = new byte[buffer.remaining()];
+        buffer.get(encrypted);
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        cipher.init(Cipher.DECRYPT_MODE, loadSecretKey(), new GCMParameterSpec(128, iv));
+        return new String(cipher.doFinal(encrypted), StandardCharsets.UTF_8);
+    }
+
+    private SecretKey loadSecretKey() throws Exception {
+        KeyStore keyStore = KeyStore.getInstance("AndroidKeyStore");
+        keyStore.load(null);
+        if (keyStore.containsAlias(SECRET_ALIAS)) return (SecretKey) keyStore.getKey(SECRET_ALIAS, null);
+        KeyGenerator generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
+        generator.init(new KeyGenParameterSpec.Builder(SECRET_ALIAS,
+                KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .build());
+        return generator.generateKey();
+    }
+
+    private void queueSync(boolean manual) {
+        queueSync(manual, false);
+    }
+
+    private void queueSync(boolean manual, boolean startup) {
+        if (!hasWebDavConfig()) {
+            if (manual) showWebDavSettings();
+            return;
+        }
+        setSyncStatus("正在与 WebDAV 比对并同步…");
+        syncExecutor.execute(() -> {
+            SyncResult result = null;
+            Exception failure = null;
+            for (int attempt = 0; attempt < 2; attempt++) {
+                try {
+                    result = synchronizeWithWebDav();
+                    failure = null;
+                    break;
+                } catch (ConcurrentRemoteChangeException exception) {
+                    failure = exception;
+                } catch (Exception exception) {
+                    failure = exception;
+                    break;
+                }
+            }
+            SyncResult completed = result;
+            Exception error = failure;
+            if (!isFinishing()) runOnUiThread(() -> {
+                if (error != null) {
+                    String message = "同步失败：" + error.getMessage();
+                    setSyncStatus(message);
+                    if (manual) Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+                } else if (completed != null) {
+                    finishSync(completed, manual, startup);
+                }
+            });
+        });
+    }
+
+    private void finishSync(SyncResult result, boolean manual, boolean startup) {
+        if (result.pulled > 0) {
+            synchronized (databaseLock) {
+                records = database.loadMonth(shownMonth.getYear(), shownMonth.getMonthValue());
+            }
+            render();
+        }
+        String message;
+        if (result.conflicts.size() > 0) {
+            message = "发现 " + result.conflicts.size() + " 条冲突，等待你选择保留哪一边";
+        } else if (result.serverRollback) {
+            message = "服务器同步版本低于本机上次确认的版本；已按逐日内容比对并恢复本机数据";
+        } else if (result.pulled > 0 || result.pushed > 0) {
+            message = "同步完成 · 拉取 " + result.pulled + " 条 · 上传 " + result.pushed + " 条";
+        } else {
+            message = "同步完成 · 本机与服务器记录一致";
+        }
+        setSyncStatus(message);
+        if (result.serverRollback && !isFinishing()) {
+            new AlertDialog.Builder(this)
+                    .setTitle("服务器版本较旧")
+                    .setMessage("服务器保存的同步版本低于本机上次确认的版本。应用已逐日比较记录内容并用本机数据修复服务器；请检查其他设备是否上传了旧备份。")
+                    .setPositiveButton("知道了", null)
+                    .show();
+        } else if (startup && result.pushed > 0 && result.conflicts.isEmpty() && !isFinishing()) {
+            new AlertDialog.Builder(this)
+                    .setTitle("本机记录比服务器新")
+                    .setMessage("发现本机有 " + result.pushed + " 条更改尚未保存在服务器，已按记录内容自动补齐到 WebDAV。")
+                    .setPositiveButton("知道了", null)
+                    .show();
+        }
+        if (!result.conflicts.isEmpty()) showSyncConflict(result.conflicts.get(0));
+        else if (manual) Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+    }
+
+    private void setSyncStatus(String message) {
+        if (syncStatusView != null) {
+            syncStatusView.animate().cancel();
+            syncStatusView.setText(message);
+            syncStatusView.setAlpha(0.55f);
+            syncStatusView.animate().alpha(1f).setDuration(180)
+                    .setInterpolator(new DecelerateInterpolator()).start();
+        }
+    }
+
+    private SyncResult synchronizeWithWebDav() throws Exception {
+        WebDavConfig config = loadWebDavConfig();
+        RemoteSnapshot remote = fetchRemote(config);
+        TreeMap<String, String> baseHashes = loadBaseHashes();
+        TreeMap<String, String> nextBase = new TreeMap<>(baseHashes);
+        TreeMap<String, AttendanceRecord> remoteRecords = new TreeMap<>(remote.records);
+        ArrayList<SyncConflict> conflicts = new ArrayList<>();
+        int pulled = 0;
+        int pushed = 0;
+        boolean serverRollback = remote.generation < getSharedPreferences(SYNC_PREFS, MODE_PRIVATE).getLong("last_generation", 0L);
+        if (remote.missing && getSharedPreferences(SYNC_PREFS, MODE_PRIVATE).getLong("last_generation", 0L) > 0L) serverRollback = true;
+        boolean needsUpload = remote.missing || serverRollback;
+
+        synchronized (databaseLock) {
+            TreeMap<String, AttendanceRecord> localRecords = new TreeMap<>(database.loadAll());
+            Set<String> dates = new TreeSet<>();
+            dates.addAll(baseHashes.keySet());
+            dates.addAll(localRecords.keySet());
+            dates.addAll(remoteRecords.keySet());
+            for (String date : dates) {
+                AttendanceRecord local = localRecords.get(date);
+                AttendanceRecord server = remoteRecords.get(date);
+                String localHash = hashRecord(date, local);
+                String serverHash = hashRecord(date, server);
+                String baseHash = baseHashes.get(date);
+                if (sameHash(localHash, serverHash)) {
+                    setBaseHash(nextBase, date, localHash);
+                    continue;
+                }
+                if (serverRollback) {
+                    if (local == null) remoteRecords.remove(date);
+                    else remoteRecords.put(date, local);
+                    setBaseHash(nextBase, date, localHash);
+                    needsUpload = true;
+                    pushed++;
+                    continue;
+                }
+                boolean localChanged = !sameHash(localHash, baseHash);
+                boolean serverChanged = !sameHash(serverHash, baseHash);
+                if (localChanged && serverChanged) {
+                    conflicts.add(new SyncConflict(date, local, server, localHash, serverHash));
+                } else if (localChanged) {
+                    if (local == null) remoteRecords.remove(date);
+                    else remoteRecords.put(date, local);
+                    setBaseHash(nextBase, date, localHash);
+                    needsUpload = true;
+                    pushed++;
+                } else if (serverChanged) {
+                    database.save(server == null
+                            ? new AttendanceRecord(date, null, null, null)
+                            : server);
+                    setBaseHash(nextBase, date, serverHash);
+                    pulled++;
+                } else {
+                    conflicts.add(new SyncConflict(date, local, server, localHash, serverHash));
+                }
+            }
+        }
+
+        long lastGeneration = getSharedPreferences(SYNC_PREFS, MODE_PRIVATE).getLong("last_generation", 0L);
+        long finalGeneration = remote.generation;
+        if (needsUpload) {
+            finalGeneration = Math.max(remote.generation, lastGeneration) + 1;
+            putRemote(config, remote, encodeRemote(finalGeneration, remoteRecords));
+        }
+        android.content.SharedPreferences preferences = getSharedPreferences(SYNC_PREFS, MODE_PRIVATE);
+        preferences.edit()
+                .putString("base_hashes", encodeBaseHashes(nextBase))
+                .putLong("last_generation", Math.max(lastGeneration, finalGeneration))
+                .apply();
+        return new SyncResult(pulled, pushed, serverRollback, conflicts);
+    }
+
+    private WebDavConfig loadWebDavConfig() throws Exception {
+        android.content.SharedPreferences preferences = getSharedPreferences(SYNC_PREFS, MODE_PRIVATE);
+        String endpoint = preferences.getString("url", "").trim();
+        if (endpoint.isEmpty()) throw new IllegalStateException("尚未设置 WebDAV 地址");
+        String encrypted = preferences.getString("password", "");
+        String password = encrypted.isEmpty() ? "" : decryptSecret(encrypted);
+        return new WebDavConfig(endpoint, preferences.getString("username", ""), password);
+    }
+
+    private TreeMap<String, String> loadBaseHashes() {
+        TreeMap<String, String> values = new TreeMap<>();
+        String json = getSharedPreferences(SYNC_PREFS, MODE_PRIVATE).getString("base_hashes", "{}");
+        try {
+            JSONObject object = new JSONObject(json);
+            Iterator<String> keys = object.keys();
+            while (keys.hasNext()) {
+                String key = keys.next();
+                if (!object.isNull(key)) values.put(key, object.getString(key));
+            }
+        } catch (JSONException ignored) { }
+        return values;
+    }
+
+    private String encodeBaseHashes(Map<String, String> hashes) throws JSONException {
+        JSONObject object = new JSONObject();
+        for (Map.Entry<String, String> entry : new TreeMap<>(hashes).entrySet()) object.put(entry.getKey(), entry.getValue());
+        return object.toString();
+    }
+
+    private void setBaseHash(Map<String, String> hashes, String date, String hash) {
+        if (hash == null) hashes.remove(date);
+        else hashes.put(date, hash);
+    }
+
+    private boolean sameHash(String left, String right) {
+        return left == null ? right == null : left.equals(right);
+    }
+
+    private String hashRecord(String date, AttendanceRecord record) throws Exception {
+        if (record == null) return null;
+        String workday = record.workday == null ? "" : record.workday ? "1" : "0";
+        String canonical = date + "\n" + (record.start == null ? "" : record.start) + "\n"
+                + (record.end == null ? "" : record.end) + "\n" + workday;
+        byte[] digest = MessageDigest.getInstance("SHA-256").digest(canonical.getBytes(StandardCharsets.UTF_8));
+        StringBuilder hex = new StringBuilder(digest.length * 2);
+        for (byte value : digest) hex.append(String.format(Locale.US, "%02x", value & 0xff));
+        return hex.toString();
+    }
+
+    private RemoteSnapshot fetchRemote(WebDavConfig config) throws Exception {
+        HttpURLConnection connection = openWebDavConnection(config);
+        connection.setRequestMethod("GET");
+        connection.setRequestProperty("Accept", "application/json");
+        try {
+            int status = connection.getResponseCode();
+            if (status == HttpURLConnection.HTTP_NOT_FOUND) return new RemoteSnapshot(true, 0L, null, new TreeMap<>());
+            if (status < 200 || status >= 300) throw new SyncException("服务器返回 HTTP " + status);
+            String etag = connection.getHeaderField("ETag");
+            String body = readResponseBody(connection.getInputStream());
+            JSONObject root = new JSONObject(body.replace("\uFEFF", "").trim());
+            if (root.optInt("schema", 0) != 1) throw new SyncException("WebDAV 文件格式不受支持或版本不兼容");
+            JSONObject recordsObject = root.optJSONObject("records");
+            if (recordsObject == null) throw new SyncException("服务器同步文件缺少 records 数据");
+            TreeMap<String, AttendanceRecord> remoteRecords = new TreeMap<>();
+            Iterator<String> keys = recordsObject.keys();
+            while (keys.hasNext()) {
+                String date = keys.next();
+                LocalDate.parse(date);
+                JSONObject item = recordsObject.optJSONObject(date);
+                if (item == null) throw new SyncException("服务器记录格式无效：" + date);
+                String start = blankToNull(item.isNull("start") ? null : item.optString("start", null));
+                String end = blankToNull(item.isNull("end") ? null : item.optString("end", null));
+                Boolean workday = item.has("workday") && !item.isNull("workday") ? item.getBoolean("workday") : null;
+                if (start == null && end == null && workday == null) continue;
+                remoteRecords.put(date, new AttendanceRecord(date, start, end, workday));
+            }
+            return new RemoteSnapshot(false, root.optLong("generation", 0L), etag, remoteRecords);
+        } catch (JSONException exception) {
+            throw new SyncException("服务器同步文件不是有效的工时日记 JSON", exception);
+        } finally {
+            connection.disconnect();
+        }
+    }
+
+    private String encodeRemote(long generation, Map<String, AttendanceRecord> records) throws JSONException {
+        JSONObject root = new JSONObject();
+        root.put("schema", 1);
+        root.put("generation", generation);
+        JSONObject recordObject = new JSONObject();
+        for (Map.Entry<String, AttendanceRecord> entry : new TreeMap<>(records).entrySet()) {
+            AttendanceRecord record = entry.getValue();
+            JSONObject item = new JSONObject();
+            item.put("start", record.start == null ? JSONObject.NULL : record.start);
+            item.put("end", record.end == null ? JSONObject.NULL : record.end);
+            item.put("workday", record.workday == null ? JSONObject.NULL : record.workday);
+            recordObject.put(entry.getKey(), item);
+        }
+        root.put("records", recordObject);
+        return root.toString();
+    }
+
+    private void putRemote(WebDavConfig config, RemoteSnapshot remote, String body) throws Exception {
+        HttpURLConnection connection = openWebDavConnection(config);
+        connection.setRequestMethod("PUT");
+        connection.setDoOutput(true);
+        connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+        if (!remote.missing && remote.etag != null && !remote.etag.trim().isEmpty() && !remote.etag.startsWith("W/")) {
+            connection.setRequestProperty("If-Match", remote.etag);
+        } else if (remote.missing) {
+            connection.setRequestProperty("If-None-Match", "*");
+        }
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        connection.setFixedLengthStreamingMode(bytes.length);
+        try {
+            try (OutputStream output = connection.getOutputStream()) { output.write(bytes); }
+            int status = connection.getResponseCode();
+            if (status == 412) throw new ConcurrentRemoteChangeException();
+            if (status < 200 || status >= 300) throw new SyncException("服务器拒绝写入（HTTP " + status + "）");
+        } finally {
+            connection.disconnect();
+        }
+    }
+
+    private HttpURLConnection openWebDavConnection(WebDavConfig config) throws Exception {
+        URL url = new URL(config.url);
+        if (!("https".equalsIgnoreCase(url.getProtocol()) || "http".equalsIgnoreCase(url.getProtocol()))) {
+            throw new SyncException("WebDAV 地址必须使用 HTTP 或 HTTPS");
+        }
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection.setConnectTimeout(15000);
+        connection.setReadTimeout(20000);
+        connection.setUseCaches(false);
+        connection.setInstanceFollowRedirects(false);
+        if (!config.username.isEmpty()) {
+            String credentials = config.username + ":" + config.password;
+            connection.setRequestProperty("Authorization", "Basic " + Base64.encodeToString(credentials.getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP));
+        }
+        return connection;
+    }
+
+    private String readResponseBody(InputStream stream) throws Exception {
+        try (InputStream input = stream; ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[8192];
+            int count;
+            while ((count = input.read(buffer)) != -1) {
+                if (output.size() + count > 2 * 1024 * 1024) throw new SyncException("服务器同步文件超过 2 MB 限制");
+                output.write(buffer, 0, count);
+            }
+            return output.toString("UTF-8");
+        }
+    }
+
+    private void showSyncConflict(SyncConflict conflict) {
+        if (isFinishing()) return;
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("记录冲突 · " + conflict.date)
+                .setMessage("本机：" + describeRecord(conflict.local) + "\n服务器：" + describeRecord(conflict.server)
+                        + "\n\n两边都在上次同步后修改了这一天。请选择保留哪一份；选择本机后会把该记录同步到服务器。")
+                .setPositiveButton("保留本机", null)
+                .setNegativeButton("采用服务器", null)
+                .setNeutralButton("稍后处理", null)
+                .create();
+        dialog.setOnShowListener(ignored -> {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                dialog.dismiss();
+                resolveSyncConflict(conflict, true);
+            });
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v -> {
+                dialog.dismiss();
+                resolveSyncConflict(conflict, false);
+            });
+        });
+        dialog.show();
+    }
+
+    private String describeRecord(AttendanceRecord record) {
+        if (record == null) return "已删除";
+        String day = record.workday == null ? "默认日历" : record.workday ? "工作日" : "休息日";
+        return day + " · 上班 " + (record.start == null ? "--:--" : record.start)
+                + " · 下班 " + (record.end == null ? "--:--" : record.end);
+    }
+
+    private void resolveSyncConflict(SyncConflict conflict, boolean keepLocal) {
+        synchronized (databaseLock) {
+            if (keepLocal) {
+                TreeMap<String, String> hashes = loadBaseHashes();
+                setBaseHash(hashes, conflict.date, conflict.serverHash);
+                try {
+                    getSharedPreferences(SYNC_PREFS, MODE_PRIVATE).edit().putString("base_hashes", encodeBaseHashes(hashes)).apply();
+                } catch (JSONException exception) {
+                    Toast.makeText(this, "无法保存冲突处理状态", Toast.LENGTH_LONG).show();
+                    return;
+                }
+            } else {
+                AttendanceRecord current = database.loadAll().get(conflict.date);
+                try {
+                    String currentHash = hashRecord(conflict.date, current);
+                    if (!sameHash(currentHash, conflict.localHash)) {
+                        Toast.makeText(this, "本机记录刚刚又被修改，请重新同步后处理", Toast.LENGTH_LONG).show();
+                        queueSync(false);
+                        return;
+                    }
+                } catch (Exception exception) {
+                    Toast.makeText(this, "无法校验本机记录：" + exception.getMessage(), Toast.LENGTH_LONG).show();
+                    return;
+                }
+                database.save(conflict.server == null
+                        ? new AttendanceRecord(conflict.date, null, null, null)
+                        : conflict.server);
+            }
+        }
+        records = database.loadMonth(shownMonth.getYear(), shownMonth.getMonthValue());
+        render();
+        setSyncStatus("冲突已处理，正在同步…");
+        queueSync(false);
     }
 
     private String formatDuration(double minutes) {
@@ -907,22 +1553,25 @@ public final class MainActivity extends Activity {
         int imported = 0;
         try (InputStream stream = getContentResolver().openInputStream(uri);
              BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
-            String line;
-            boolean firstLine = true;
-            while ((line = reader.readLine()) != null) {
-                if (firstLine) { line = line.replace("\uFEFF", ""); firstLine = false; }
-                ArrayList<String> cells = parseCsv(line);
-                if (cells.size() < 5 || !cells.get(0).matches("\\d{4}-\\d{2}-\\d{2}")) continue;
-                LocalDate.parse(cells.get(0));
-                String start = blankToNull(cells.get(3));
-                String end = blankToNull(cells.get(4));
-                Boolean workday = cells.size() > 2 ? "是".equals(cells.get(2)) || "yes".equalsIgnoreCase(cells.get(2)) : null;
-                database.save(new AttendanceRecord(cells.get(0), start, end, workday));
-                imported++;
+            synchronized (databaseLock) {
+                String line;
+                boolean firstLine = true;
+                while ((line = reader.readLine()) != null) {
+                    if (firstLine) { line = line.replace("\uFEFF", ""); firstLine = false; }
+                    ArrayList<String> cells = parseCsv(line);
+                    if (cells.size() < 5 || !cells.get(0).matches("\\d{4}-\\d{2}-\\d{2}")) continue;
+                    LocalDate.parse(cells.get(0));
+                    String start = blankToNull(cells.get(3));
+                    String end = blankToNull(cells.get(4));
+                    Boolean workday = cells.size() > 2 ? "是".equals(cells.get(2)) || "yes".equalsIgnoreCase(cells.get(2)) : null;
+                    database.save(new AttendanceRecord(cells.get(0), start, end, workday));
+                    imported++;
+                }
+                records = database.loadMonth(shownMonth.getYear(), shownMonth.getMonthValue());
             }
-            records = database.loadMonth(shownMonth.getYear(), shownMonth.getMonthValue());
             render();
             Toast.makeText(this, "已导入 " + imported + " 条日期记录", Toast.LENGTH_LONG).show();
+            if (imported > 0) queueSync(false);
         } catch (Exception exception) {
             Toast.makeText(this, "导入失败：" + exception.getMessage(), Toast.LENGTH_LONG).show();
         }
@@ -959,6 +1608,16 @@ public final class MainActivity extends Activity {
         view.setBackground(roundBackground(primary ? GREEN : CARD, 10, primary ? GREEN : LINE));
         view.setClickable(true);
         view.setFocusable(true);
+        view.setOnTouchListener((target, event) -> {
+            if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                target.animate().cancel();
+                target.animate().scaleX(0.975f).scaleY(0.975f).setDuration(75).start();
+            } else if (event.getAction() == MotionEvent.ACTION_UP || event.getAction() == MotionEvent.ACTION_CANCEL) {
+                target.animate().scaleX(1f).scaleY(1f).setDuration(130)
+                        .setInterpolator(new DecelerateInterpolator()).start();
+            }
+            return false;
+        });
         return view;
     }
 
@@ -1072,6 +1731,71 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private static final class WebDavConfig {
+        final String url;
+        final String username;
+        final String password;
+
+        WebDavConfig(String url, String username, String password) {
+            this.url = url;
+            this.username = username == null ? "" : username;
+            this.password = password == null ? "" : password;
+        }
+    }
+
+    private static final class RemoteSnapshot {
+        final boolean missing;
+        final long generation;
+        final String etag;
+        final TreeMap<String, AttendanceRecord> records;
+
+        RemoteSnapshot(boolean missing, long generation, String etag, Map<String, AttendanceRecord> records) {
+            this.missing = missing;
+            this.generation = generation;
+            this.etag = etag;
+            this.records = new TreeMap<>(records);
+        }
+    }
+
+    private static final class SyncConflict {
+        final String date;
+        final AttendanceRecord local;
+        final AttendanceRecord server;
+        final String localHash;
+        final String serverHash;
+
+        SyncConflict(String date, AttendanceRecord local, AttendanceRecord server, String localHash, String serverHash) {
+            this.date = date;
+            this.local = local;
+            this.server = server;
+            this.localHash = localHash;
+            this.serverHash = serverHash;
+        }
+    }
+
+    private static final class SyncResult {
+        final int pulled;
+        final int pushed;
+        final boolean serverRollback;
+        final ArrayList<SyncConflict> conflicts;
+
+        SyncResult(int pulled, int pushed, boolean serverRollback, ArrayList<SyncConflict> conflicts) {
+            this.pulled = pulled;
+            this.pushed = pushed;
+            this.serverRollback = serverRollback;
+            this.conflicts = conflicts;
+        }
+    }
+
+    private static class SyncException extends Exception {
+        SyncException(String message) { super(message); }
+        SyncException(String message, Throwable cause) { super(message, cause); }
+    }
+
+    private static final class ConcurrentRemoteChangeException extends SyncException {
+        ConcurrentRemoteChangeException() { super("服务器文件在同步过程中被另一台设备修改，请重试"); }
+    }
+
     private static final class AttendanceDatabase extends SQLiteOpenHelper {
         AttendanceDatabase(Activity activity) { super(activity, "attendance.db", null, 1); }
 
@@ -1095,6 +1819,28 @@ public final class MainActivity extends Activity {
             return result;
         }
 
+        Map<String, AttendanceRecord> loadAll() {
+            HashMap<String, AttendanceRecord> result = new HashMap<>();
+            SQLiteDatabase db = getReadableDatabase();
+            try (Cursor cursor = db.query("attendance", new String[]{"date", "start_time", "end_time", "workday"}, null, null, null, null, "date ASC")) {
+                while (cursor.moveToNext()) {
+                    Boolean workday = cursor.isNull(3) ? null : cursor.getInt(3) != 0;
+                    AttendanceRecord record = new AttendanceRecord(cursor.getString(0), cursor.getString(1), cursor.getString(2), workday);
+                    result.put(record.date, record);
+                }
+            }
+            return result;
+        }
+
+        AttendanceRecord loadOne(String date) {
+            SQLiteDatabase db = getReadableDatabase();
+            try (Cursor cursor = db.query("attendance", new String[]{"date", "start_time", "end_time", "workday"}, "date = ?", new String[]{date}, null, null, null)) {
+                if (!cursor.moveToFirst()) return null;
+                Boolean workday = cursor.isNull(3) ? null : cursor.getInt(3) != 0;
+                return new AttendanceRecord(cursor.getString(0), cursor.getString(1), cursor.getString(2), workday);
+            }
+        }
+
         void save(AttendanceRecord record) {
             SQLiteDatabase db = getWritableDatabase();
             if (!hasValue(record.start) && !hasValue(record.end) && record.workday == null) {
@@ -1112,4 +1858,3 @@ public final class MainActivity extends Activity {
         private static boolean hasValue(String value) { return value != null && !value.trim().isEmpty(); }
     }
 }
-

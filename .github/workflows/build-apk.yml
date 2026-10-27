@@ -64,6 +64,5 @@ jobs:
         run: |
           gh release create "v${VERSION}" "dist/work-hours-journal-v${VERSION}.apk" \
             --title "工时日记 v${VERSION}" \
-            --notes "Android APK 安装包。包含月度视图、每日工时结算和三栏底部导航。"
-
+            --notes "Android APK 安装包。包含月度视图、每日工时结算、WebDAV 云同步和当前时间快速打卡。"
 
