@@ -80,11 +80,18 @@
     .section-head h2 { margin: 0; font-size: 17px; font-weight: 730; letter-spacing: -.02em; }
     .section-head p { margin: 3px 0 0; color: var(--muted); font-size: 11px; }
     .days-list { display: grid; gap: 8px; }
-    .day-card { position: relative; display: grid; grid-template-columns: minmax(190px, 1fr) minmax(210px, 1fr) minmax(120px, .45fr) 16px; align-items: center; gap: 14px; min-height: 82px; width: 100%; padding: 13px 16px; border: 1px solid var(--line); border-radius: 13px; color: var(--ink); background: var(--card); text-align: left; cursor: pointer; transition: border-color .15s ease, box-shadow .15s ease; }
+    .day-card { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 82px; align-items: center; gap: 12px; min-height: 82px; width: 100%; padding: 11px 14px; border: 1px solid var(--line); border-radius: 13px; color: var(--ink); background: var(--card); transition: border-color .15s ease, box-shadow .15s ease; }
     .day-card:hover { border-color: #b8c7ba; box-shadow: 0 5px 18px #25372b07; }
-    .day-card:focus-visible { outline: 3px solid #235b4533; outline-offset: 2px; }
     .day-card.is-weekend { background: #fafaf6; }
     .day-card.is-invalid { border-color: #eac3ba; }
+    .day-card-main { display: grid; grid-template-columns: minmax(190px, 1fr) minmax(210px, 1fr) minmax(120px, .45fr); align-items: center; gap: 14px; min-width: 0; width: 100%; padding: 0; border: 0; color: inherit; background: transparent; font: inherit; text-align: left; cursor: pointer; }
+    .day-card-main:focus-visible { outline: 3px solid #235b4533; outline-offset: 3px; border-radius: 8px; }
+    .day-actions { display: flex; flex-direction: column; align-items: stretch; gap: 5px; }
+    .day-status-toggle { min-height: 28px; padding: 4px 7px; border: 0; border-radius: 7px; color: var(--green); background: var(--mint); font-size: 10px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+    .day-status-toggle.rest { color: #777f78; background: #efefe9; }
+    .day-status-toggle:hover { filter: brightness(.97); }
+    .day-status-toggle:focus-visible, .day-edit-button:focus-visible { outline: 3px solid #235b4533; outline-offset: 2px; }
+    .day-edit-button { min-height: 25px; padding: 2px 7px; border: 0; border-radius: 6px; color: var(--muted); background: transparent; font-size: 10px; cursor: pointer; }
     .day-date { display: flex; align-items: center; min-width: 0; gap: 11px; }
     .day-number { width: 39px; height: 42px; flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 10px; color: var(--green); background: var(--mint); }
     .day-number strong { font-size: 16px; line-height: 1; }
@@ -92,8 +99,6 @@
     .is-weekend .day-number { color: #818981; background: #efefe9; }
     .day-meta { min-width: 0; }
     .day-title { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12px; font-weight: 700; }
-    .day-tag { padding: 2px 6px; border-radius: 5px; color: var(--green); background: var(--mint); font-size: 9px; font-weight: 650; }
-    .day-tag.rest { color: #777f78; background: #efefe9; }
     .day-subtitle { margin-top: 3px; color: var(--muted); font-size: 10px; }
     .day-times { min-width: 0; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
     .day-times strong { color: var(--ink); font-weight: 620; }
@@ -136,7 +141,8 @@
     .empty-note { margin: 20px 0; color: var(--muted); font-size: 12px; }
     @media (max-width: 820px) {
       .overview { grid-template-columns: repeat(2, 1fr); }
-      .day-card { grid-template-columns: minmax(150px, 1fr) minmax(170px, 1fr) auto 14px; gap: 10px; }
+      .day-card { grid-template-columns: minmax(0, 1fr) 78px; gap: 8px; }
+      .day-card-main { grid-template-columns: minmax(140px, 1fr) minmax(150px, 1fr) auto; gap: 9px; }
       .day-total { text-align: right; }
       .day-total span { margin: 0; }
       .policy { grid-template-columns: 1fr; gap: 13px; }
@@ -153,12 +159,14 @@
       .stat-value { font-size: 23px; }
       .progress-panel { grid-template-columns: 1fr; gap: 15px; padding: 16px; }
       .progress-side { padding: 12px 0 0; border-left: 0; border-top: 1px solid #ffffff2b; }
-      .day-card { grid-template-columns: minmax(0, 1fr) auto 14px; gap: 8px; padding: 12px; }
+      .day-card { grid-template-columns: minmax(0, 1fr) 66px; gap: 6px; padding: 10px; }
+      .day-card-main { grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
       .day-date { grid-column: 1; }
       .day-times { grid-column: 1; padding-left: 50px; margin-top: -5px; }
       .day-total { grid-column: 2; grid-row: 1 / span 2; text-align: right; }
       .day-total span { display: block; margin-top: 2px; }
-      .day-chevron { grid-column: 3; grid-row: 1 / span 2; }
+      .day-status-toggle { padding-inline: 3px; font-size: 9px; }
+      .day-edit-button { padding-inline: 2px; }
       .dialog-content { padding: 20px; }
       .footer { flex-direction: column; gap: 5px; }
     }
@@ -214,7 +222,7 @@
 
     <section aria-labelledby="daysTitle">
       <div class="section-head">
-        <div><h2 id="daysTitle">每日记录</h2><p>按实际上下班时间记录 · 可提前打卡 · 下班可填至 24:00</p></div>
+        <div><h2 id="daysTitle">每日记录</h2><p>点工作日 / 休息日标签可快速切换 · 点卡片可编辑打卡 · 下班可填至 24:00</p></div>
         <p id="dataHint">数据仅保存在这台设备的浏览器中</p>
       </div>
       <div class="days-list" id="daysList"></div>
@@ -388,13 +396,10 @@
           const hasStart = Boolean(record.start);
           const hasEnd = Boolean(record.end);
           const invalid = hasStart && hasEnd && minutes === null;
-          const article = document.createElement('button');
-          article.type = 'button';
+          const article = document.createElement('article');
           article.className = `day-card${!workday ? ' is-weekend' : ''}${invalid ? ' is-invalid' : ''}`;
           article.dataset.key = key;
-          article.setAttribute('aria-label', `${month + 1} 月 ${day} 日，${workday ? '工作日' : '休息日'}，点击查看或编辑`);
           const dayTitle = `${month + 1} 月 ${day} 日`;
-          let status = workday ? '工作日' : '休息日';
           let result = workday && !future ? '待记录' : future ? '未开始' : '休息日';
           let resultClass = '';
           if (minutes !== null) {
@@ -413,19 +418,34 @@
           }
           const punchLabel = [hasStart ? `上班 ${record.start}` : '上班 --:--', hasEnd ? `下班 ${record.end}` : '下班 --:--'].join('  ·  ');
           const smallResult = minutes !== null ? `${workday ? '已记录' : '休息日补录'} · 按计薪时段累计` : invalid ? '下班时间须晚于上班时间' : hasStart && !hasEnd ? '已录上班时间，请补录下班时间' : !hasStart && hasEnd ? '已录下班时间，请补录上班时间' : '点击设置打卡时间';
-          article.innerHTML = `
+          const openButton = document.createElement('button');
+          openButton.type = 'button';
+          openButton.className = 'day-card-main';
+          openButton.setAttribute('aria-label', `${month + 1} 月 ${day} 日，${workday ? '工作日' : '休息日'}，点击查看或编辑`);
+          openButton.innerHTML = `
             <div class="day-date">
               <div class="day-number"><strong>${String(day).padStart(2, '0')}</strong><span>${dateLabel(date)}</span></div>
-              <div class="day-meta"><div class="day-title">${dayTitle}<span class="day-tag${workday ? '' : ' rest'}">${status}</span></div><div class="day-subtitle">${workday ? '每日目标 8 小时' : '休息日'}</div></div>
+              <div class="day-meta"><div class="day-title">${dayTitle}</div><div class="day-subtitle">${workday ? '每日目标 8 小时' : '可补录实际工时'}</div></div>
             </div>
-            <div class="day-times"><strong>${punchLabel}</strong><div class="day-open-hint">点击进入详情设置</div></div>
+            <div class="day-times"><strong>${punchLabel}</strong><div class="day-open-hint">点击查看打卡详情</div></div>
             <div class="day-total"><strong>${result}</strong><span class="${resultClass}">${smallResult}</span></div>`;
-          const chevron = document.createElement('span');
-          chevron.className = 'day-chevron';
-          chevron.setAttribute('aria-hidden', 'true');
-          chevron.textContent = '›';
-          article.append(chevron);
-          article.addEventListener('click', () => openDayDialog(key));
+          openButton.addEventListener('click', () => openDayDialog(key));
+          const actions = document.createElement('div');
+          actions.className = 'day-actions';
+          const statusToggle = document.createElement('button');
+          statusToggle.type = 'button';
+          statusToggle.className = `day-status-toggle${workday ? '' : ' rest'}`;
+          statusToggle.textContent = workday ? '工作日' : '休息日';
+          statusToggle.setAttribute('aria-label', `切换为${workday ? '休息日' : '工作日'}`);
+          statusToggle.addEventListener('click', () => updateRecord(key, 'workday', !workday));
+          const editButton = document.createElement('button');
+          editButton.type = 'button';
+          editButton.className = 'day-edit-button';
+          editButton.textContent = '编辑';
+          editButton.setAttribute('aria-label', `编辑 ${month + 1} 月 ${day} 日的打卡时间`);
+          editButton.addEventListener('click', () => openDayDialog(key));
+          actions.append(statusToggle, editButton);
+          article.append(openButton, actions);
           fragment.append(article);
         }
         list.replaceChildren(fragment);

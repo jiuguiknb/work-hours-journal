@@ -344,9 +344,17 @@ public final class MainActivity extends Activity {
 
             LinearLayout dateText = column();
             dateText.setPadding(dp(9), 0, 0, 0);
-            dateText.addView(text(date.getMonthValue() + " 月 " + day + " 日", 12, INK, true));
-            String dayCaption = (date.equals(today) ? "今天 · " : "") + (workday ? "工作日 · 目标 8 小时" : "休息日");
-            dateText.addView(text(dayCaption, 10, date.equals(today) ? GREEN : MUTED, date.equals(today)), marginParams(-1, -2, 0, 3, 0, 0));
+            String title = date.getMonthValue() + " 月 " + day + " 日" + (date.equals(today) ? " · 今天" : "");
+            dateText.addView(text(title, 12, date.equals(today) ? GREEN : INK, true));
+            TextView workdayToggle = text(workday ? "工作日" : "休息日", 9, workday ? GREEN : MUTED, true);
+            workdayToggle.setPadding(dp(7), dp(2), dp(7), dp(2));
+            workdayToggle.setBackground(roundBackground(workday ? MINT : 0xFFEFEFE9, 6, 0));
+            workdayToggle.setClickable(true);
+            workdayToggle.setFocusable(true);
+            workdayToggle.setContentDescription((workday ? "工作日" : "休息日") + "，点击切换为" + (workday ? "休息日" : "工作日"));
+            workdayToggle.setOnClickListener(v -> toggleWorkday(date, record));
+            dateText.addView(workdayToggle, marginParams(-2, dp(21), 0, 3, 0, 0));
+            dateText.addView(text(workday ? "目标 8 小时" : "可补录实际工时", 9, MUTED, false), marginParams(-1, -2, 0, 2, 0, 0));
             heading.addView(dateText, new LinearLayout.LayoutParams(0, -2, 1));
 
             String totalLabel = paid >= 0 ? formatHours(paid) + " 小时"
