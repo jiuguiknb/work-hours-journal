@@ -14,7 +14,9 @@ import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -53,6 +55,9 @@ public final class MainActivity extends Activity {
     private LocalDate today;
     private AttendanceDatabase database;
     private Map<String, AttendanceRecord> records = new HashMap<>();
+    private SwipeFrameLayout pageContainer;
+    private LinearLayout homePage;
+    private ScrollView daysScroll;
     private LinearLayout daysList;
     private TextView monthTitle;
     private TextView actualHours;
@@ -65,6 +70,8 @@ public final class MainActivity extends Activity {
     private View progressRemainder;
     private TextView progressDays;
     private TextView progressPending;
+    private boolean focusTodayOnRender = true;
+    private boolean scrollDaysToTopOnRender;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -82,51 +89,54 @@ public final class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        today = LocalDate.now();
-        if (monthTitle != null) render();
+        LocalDate resumedToday = LocalDate.now();
+        if (monthTitle != null && !resumedToday.equals(today)) {
+            today = resumedToday;
+            shownMonth = today.withDayOfMonth(1);
+            focusTodayOnRender = true;
+            render();
+        } else {
+            today = resumedToday;
+        }
     }
 
     private View createPage() {
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        scroll.setBackgroundColor(PAPER);
-        LinearLayout page = column();
-        page.setPadding(dp(18), dp(18), dp(18), dp(34));
-        scroll.addView(page);
+        pageContainer = new SwipeFrameLayout(this);
+        pageContainer.setBackgroundColor(PAPER);
+        pageContainer.setOnSwipeListener(toTools -> showPage(toTools));
 
-        LinearLayout top = row();
-        TextView brand = text("▦  工时日记", 14, GREEN, true);
-        top.addView(brand, new LinearLayout.LayoutParams(0, dp(42), 1));
-        TextView export = action("导出备份", true);
-        export.setOnClickListener(v -> exportBackup());
-        top.addView(export, marginParams(-2, 42, 6, 0, 0, 0));
-        TextView backupButton = action("恢复备份", false);
-        backupButton.setOnClickListener(v -> chooseBackup());
-        top.addView(backupButton, params(-2, 42));
-        page.addView(top);
+        homePage = column();
+        homePage.setPadding(dp(16), dp(12), dp(16), dp(12));
+        pageContainer.addView(homePage, new FrameLayout.LayoutParams(-1, -1));
+        buildHomePage(homePage);
 
-        addSpace(page, 22);
-        page.addView(text("MY WORK LOG", 10, GREEN, true));
-        TextView headline = text("把每一天，记得清清楚楚。", 25, INK, true);
-        headline.setPadding(0, dp(5), 0, dp(2));
-        page.addView(headline);
-        page.addView(text("记录保存在手机本地，可随时导出备份。", 12, MUTED, false));
+        ScrollView toolsScroll = new ScrollView(this);
+        toolsScroll.setFillViewport(true);
+        toolsScroll.setBackgroundColor(PAPER);
+        toolsScroll.setVisibility(View.GONE);
+        LinearLayout toolsPage = column();
+        toolsPage.setPadding(dp(20), dp(22), dp(20), dp(34));
+        toolsScroll.addView(toolsPage);
+        pageContainer.addView(toolsScroll, new FrameLayout.LayoutParams(-1, -1));
+        buildToolsPage(toolsPage);
+        return pageContainer;
+    }
 
-        addSpace(page, 17);
+    private void buildHomePage(LinearLayout page) {
         LinearLayout monthRow = row();
         TextView previous = action("‹", false);
         previous.setTextSize(21);
-        previous.setOnClickListener(v -> { shownMonth = shownMonth.minusMonths(1); render(); });
+        previous.setOnClickListener(v -> { shownMonth = shownMonth.minusMonths(1); focusTodayOnRender = false; scrollDaysToTopOnRender = true; render(); });
         monthRow.addView(previous, params(44, 42));
         monthTitle = text("", 15, INK, true);
         monthTitle.setGravity(Gravity.CENTER);
         monthRow.addView(monthTitle, new LinearLayout.LayoutParams(0, dp(42), 1));
         TextView next = action("›", false);
         next.setTextSize(21);
-        next.setOnClickListener(v -> { shownMonth = shownMonth.plusMonths(1); render(); });
+        next.setOnClickListener(v -> { shownMonth = shownMonth.plusMonths(1); focusTodayOnRender = false; scrollDaysToTopOnRender = true; render(); });
         monthRow.addView(next, params(44, 42));
         TextView todayButton = action("今天", true);
-        todayButton.setOnClickListener(v -> { shownMonth = today.withDayOfMonth(1); render(); });
+        todayButton.setOnClickListener(v -> { shownMonth = today.withDayOfMonth(1); focusTodayOnRender = true; render(); });
         monthRow.addView(todayButton, marginParams(-2, 42, 8, 0, 0, 0));
         page.addView(monthRow);
 
@@ -168,15 +178,46 @@ public final class MainActivity extends Activity {
         progressCard.addView(progressBottom, marginParams(-1, -2, 0, 7, 0, 0));
         page.addView(progressCard, marginParams(-1, -2, 0, 12, 0, 0));
 
-        addSpace(page, 24);
-        page.addView(text("每日记录", 17, INK, true));
-        TextView tip = text("按实际上下班时间记录 · 可提前打卡 · 下班可填至 24:00", 11, MUTED, false);
-        tip.setPadding(0, dp(3), 0, dp(10));
+        addSpace(page, 13);
+        LinearLayout dailyHeading = row();
+        dailyHeading.addView(text("每日记录", 16, INK, true), new LinearLayout.LayoutParams(0, -2, 1));
+        dailyHeading.addView(text("左滑进入工具页  ›", 9, MUTED, false));
+        page.addView(dailyHeading);
+        TextView tip = text("按实际上下班时间记录 · 可提前打卡 · 下班可填至 24:00", 10, MUTED, false);
+        tip.setPadding(0, dp(3), 0, dp(7));
         page.addView(tip);
+        daysScroll = new ScrollView(this);
+        daysScroll.setFillViewport(false);
+        daysScroll.setVerticalScrollBarEnabled(true);
+        daysScroll.setClipToPadding(false);
         daysList = column();
-        page.addView(daysList);
+        daysScroll.addView(daysList, new ScrollView.LayoutParams(-1, -2));
+        page.addView(daysScroll, new LinearLayout.LayoutParams(-1, 0, 1));
+    }
 
-        addSpace(page, 19);
+    private void buildToolsPage(LinearLayout page) {
+        LinearLayout top = row();
+        top.addView(text("▦  工时日记", 14, GREEN, true), new LinearLayout.LayoutParams(0, dp(42), 1));
+        TextView back = action("‹ 返回首页", false);
+        back.setOnClickListener(v -> showPage(false));
+        top.addView(back, params(-2, 42));
+        page.addView(top);
+        addSpace(page, 21);
+        page.addView(text("工具与备份", 24, INK, true));
+        TextView toolHint = text("记录只保存在这台手机的本地数据库中。建议定期导出备份。", 12, MUTED, false);
+        toolHint.setPadding(0, dp(6), 0, dp(18));
+        page.addView(toolHint);
+
+        TextView export = action("导出备份", true);
+        export.setTextSize(13);
+        export.setOnClickListener(v -> exportBackup());
+        page.addView(export, params(-1, 50));
+        TextView backupButton = action("恢复备份", false);
+        backupButton.setTextSize(13);
+        backupButton.setOnClickListener(v -> chooseBackup());
+        page.addView(backupButton, marginParams(-1, 50, 0, 10, 0, 0));
+
+        addSpace(page, 22);
         LinearLayout policy = column();
         policy.setPadding(dp(15), dp(14), dp(15), dp(14));
         policy.setBackground(roundBackground(0xFFEEEFE8, 14, 0));
@@ -187,10 +228,16 @@ public final class MainActivity extends Activity {
         policy.addView(policyText);
         page.addView(policy);
         addSpace(page, 10);
-        TextView localHint = text("数据在手机本地 SQLite 数据库中 · 换机前请先导出 CSV", 10, MUTED, false);
+        TextView localHint = text("换机前请先导出 CSV；恢复时选择之前保存的备份文件。", 10, MUTED, false);
         localHint.setGravity(Gravity.CENTER);
         page.addView(localHint);
-        return scroll;
+    }
+
+    private void showPage(boolean showTools) {
+        if (pageContainer == null || pageContainer.getChildCount() < 2) return;
+        pageContainer.getChildAt(0).setVisibility(showTools ? View.GONE : View.VISIBLE);
+        pageContainer.getChildAt(1).setVisibility(showTools ? View.VISIBLE : View.GONE);
+        pageContainer.setCurrentPage(showTools ? 1 : 0);
     }
 
     private TextView addStat(LinearLayout parent, String label, String initial, String note, int color) {
@@ -264,6 +311,11 @@ public final class MainActivity extends Activity {
     }
 
     private void renderDays() {
+        int previousScrollY = daysScroll.getScrollY();
+        boolean focusToday = focusTodayOnRender
+                && shownMonth.getYear() == today.getYear()
+                && shownMonth.getMonthValue() == today.getMonthValue();
+        boolean resetScroll = scrollDaysToTopOnRender;
         daysList.removeAllViews();
         for (int day = 1; day <= shownMonth.lengthOfMonth(); day++) {
             LocalDate date = shownMonth.withDayOfMonth(day);
@@ -274,7 +326,7 @@ public final class MainActivity extends Activity {
 
             LinearLayout card = column();
             card.setPadding(dp(13), dp(11), dp(13), dp(12));
-            card.setBackground(roundBackground(CARD, 12, LINE));
+            card.setBackground(roundBackground(CARD, 12, date.equals(today) ? GREEN : LINE));
             card.setClickable(true);
             card.setFocusable(true);
             card.setOnClickListener(v -> showDayDetails(date));
@@ -293,7 +345,8 @@ public final class MainActivity extends Activity {
             LinearLayout dateText = column();
             dateText.setPadding(dp(9), 0, 0, 0);
             dateText.addView(text(date.getMonthValue() + " 月 " + day + " 日", 12, INK, true));
-            dateText.addView(text(workday ? "工作日 · 目标 8 小时" : "休息日", 10, MUTED, false), marginParams(-1, -2, 0, 3, 0, 0));
+            String dayCaption = (date.equals(today) ? "今天 · " : "") + (workday ? "工作日 · 目标 8 小时" : "休息日");
+            dateText.addView(text(dayCaption, 10, date.equals(today) ? GREEN : MUTED, date.equals(today)), marginParams(-1, -2, 0, 3, 0, 0));
             heading.addView(dateText, new LinearLayout.LayoutParams(0, -2, 1));
 
             String totalLabel = paid >= 0 ? formatHours(paid) + " 小时"
@@ -317,6 +370,18 @@ public final class MainActivity extends Activity {
             card.addView(detail, marginParams(-1, -2, 0, 2, 0, 0));
             daysList.addView(card, marginParams(-1, -2, 0, 0, 0, 7));
         }
+        daysScroll.post(() -> {
+            if (focusToday) {
+                View todayCard = daysList.getChildAt(today.getDayOfMonth() - 1);
+                if (todayCard != null) daysScroll.smoothScrollTo(0, todayCard.getTop());
+            } else if (resetScroll) {
+                daysScroll.scrollTo(0, 0);
+            } else {
+                daysScroll.scrollTo(0, previousScrollY);
+            }
+        });
+        focusTodayOnRender = false;
+        scrollDaysToTopOnRender = false;
     }
 
     private String dayDetail(AttendanceRecord record, boolean workday, int paid, boolean invalid) {
@@ -625,6 +690,60 @@ public final class MainActivity extends Activity {
     }
 
     private int dp(int value) { return (int) (value * getResources().getDisplayMetrics().density + 0.5f); }
+
+    private static final class SwipeFrameLayout extends FrameLayout {
+        interface OnSwipeListener { void onSwipe(boolean left); }
+
+        private final float swipeThreshold;
+        private float downX;
+        private float downY;
+        private int currentPage;
+        private OnSwipeListener listener;
+
+        SwipeFrameLayout(Activity activity) {
+            super(activity);
+            swipeThreshold = 56 * activity.getResources().getDisplayMetrics().density;
+        }
+
+        void setOnSwipeListener(OnSwipeListener listener) { this.listener = listener; }
+        void setCurrentPage(int currentPage) { this.currentPage = currentPage; }
+
+        @Override protected void onAttachedToWindow() {
+            super.onAttachedToWindow();
+            setCurrentPage(0);
+        }
+
+        @Override public boolean onInterceptTouchEvent(MotionEvent event) {
+            if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                downX = event.getX();
+                downY = event.getY();
+                return false;
+            }
+            if (event.getActionMasked() == MotionEvent.ACTION_MOVE) {
+                float deltaX = event.getX() - downX;
+                float deltaY = event.getY() - downY;
+                if (Math.abs(deltaX) > swipeThreshold && Math.abs(deltaX) > Math.abs(deltaY) * 1.35f) {
+                    return (deltaX < 0 && currentPage == 0) || (deltaX > 0 && currentPage == 1);
+                }
+            }
+            return false;
+        }
+
+        @Override public boolean onTouchEvent(MotionEvent event) {
+            if (event.getActionMasked() == MotionEvent.ACTION_UP) {
+                float deltaX = event.getX() - downX;
+                if (listener != null && Math.abs(deltaX) > swipeThreshold) listener.onSwipe(deltaX < 0);
+                performClick();
+                return true;
+            }
+            return true;
+        }
+
+        @Override public boolean performClick() {
+            super.performClick();
+            return true;
+        }
+    }
 
     private static final class AttendanceRecord {
         final String date;
